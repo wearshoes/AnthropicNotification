@@ -83,11 +83,17 @@ TDD order:
 ## 2. Implementation
 - [ ] 2.1 Implement src/formatters/{platform}.py
 
-## 3. Workflow
-- [ ] 3.1 Add env vars to .github/workflows/monitor.yml
+## 3. Workflow + Docs
+- [ ] 3.1 Add env vars to .github/workflows/monitor.yml (if missing)
+- [ ] 3.2 Update CODEBUDDY.md architecture section
+- [ ] 3.3 Update README.md Secret table (if missing)
+- [ ] 3.4 Update README_EN.md Secret table (if missing)
 
 ## 4. Verify
 - [ ] 4.1 Run full test suite
+
+## 5. Ship
+- [ ] 5.1 Commit, push, sync specs, archive change
 ```
 
 ---
@@ -150,7 +156,7 @@ Report: `[TDD] module={platform} step=GREEN tests=N/N status=ALL PASSING`
 
 ## Step 5: Update Workflow
 
-Add env vars to `.github/workflows/monitor.yml` under the `Run monitor` step:
+Check `.github/workflows/monitor.yml` for existing env vars. Add if missing:
 
 ```yaml
 {PLATFORM}_WEBHOOK: ${{ secrets.{PLATFORM}_WEBHOOK }}
@@ -163,7 +169,29 @@ If signing is needed, also add:
 
 ---
 
-## Step 6: Verify
+## Step 6: Update Documentation
+
+### CODEBUDDY.md
+Update the Architecture section's file tree to include the new formatter:
+```
+└── formatters/
+    ├── ...
+    └── {platform}.py   # {Platform} formatter description
+```
+
+### README.md (Chinese)
+Check if the new platform's Secret is listed in the "配置 Webhook Secret" table. If not, add a row:
+```
+| `{PLATFORM}_WEBHOOK` | {平台}机器人 Webhook URL | 可选 |
+```
+If signing is needed, also add `{PLATFORM}_SECRET`.
+
+### README_EN.md (English)
+Same check and update for the English version's "Configure Webhook Secrets" table.
+
+---
+
+## Step 7: Verify
 
 Run full test suite:
 ```bash
@@ -174,12 +202,15 @@ All tests must pass before proceeding.
 
 ---
 
-## Step 7: Complete
+## Step 8: Commit, Push, Archive
 
 1. Mark all tasks complete in tasks.md
-2. Commit and push
-3. Archive the change: sync specs, move to archive
-4. Inform user to add `{PLATFORM}_WEBHOOK` to GitHub Secrets to enable
+2. `git add -A && git commit` with descriptive message
+3. `git push`
+4. Sync specs: copy `openspec/changes/{change-name}/specs/` to `openspec/specs/`
+5. Archive: `mv openspec/changes/{change-name} openspec/changes/archive/YYYY-MM-DD-{change-name}`
+6. Commit and push the archive
+7. Inform user to add `{PLATFORM}_WEBHOOK` to GitHub Secrets to enable
 
 ---
 
