@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(Write|Edit|MultiEdit)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CODEBUDDY_PROJECT_DIR/.codebuddy/hooks/tdd-guard.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^(Write|Edit|MultiEdit)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CODEBUDDY_PROJECT_DIR/.codebuddy/hooks/tdd-autotest.sh\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
