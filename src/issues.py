@@ -1,19 +1,27 @@
 """Manage GitHub Issues as state storage for known URLs via gh CLI."""
 
 import json
+import logging
 import subprocess
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+logger = logging.getLogger(__name__)
+
 
 def _run_gh(args: list[str]) -> subprocess.CompletedProcess:
     """Run a gh CLI command and return the result."""
-    return subprocess.run(
+    result = subprocess.run(
         ["gh", *args],
         capture_output=True,
         text=True,
         check=False,
     )
+    if result.returncode != 0:
+        logger.error(f"gh command failed: gh {' '.join(args)}")
+        logger.error(f"  stdout: {result.stdout}")
+        logger.error(f"  stderr: {result.stderr}")
+    return result
 
 
 def get_baseline_issue(category: str) -> tuple[int | None, set[str]]:
