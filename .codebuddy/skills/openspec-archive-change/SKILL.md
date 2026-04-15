@@ -82,7 +82,20 @@ Archive a completed change in the experimental workflow.
    mv openspec/changes/<name> openspec/changes/archive/YYYY-MM-DD-<name>
    ```
 
-6. **Display summary**
+6. **Commit and push**
+
+   After archiving, automatically commit and push all changes:
+
+   ```bash
+   git add -A
+   git commit -m "chore: archive <change-name>, sync specs"
+   git push
+   ```
+
+   This ensures the archive and synced specs are persisted to remote immediately.
+   If the commit fails due to the commit-msg hook, adjust the message format.
+
+7. **Display summary**
 
    Show archive completion summary including:
    - Change name

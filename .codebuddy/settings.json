@@ -8,6 +8,11 @@
             "type": "command",
             "command": "bash \"$CODEBUDDY_PROJECT_DIR/.codebuddy/hooks/tdd-guard.sh\"",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash \"$CODEBUDDY_PROJECT_DIR/.codebuddy/hooks/openspec-guard.sh\"",
+            "timeout": 10
           }
         ]
       }
@@ -19,6 +24,16 @@
           {
             "type": "command",
             "command": "bash \"$CODEBUDDY_PROJECT_DIR/.codebuddy/hooks/tdd-autotest.sh\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CODEBUDDY_PROJECT_DIR/.codebuddy/hooks/ci-status.sh\"",
             "timeout": 30
           }
         ]

@@ -30,10 +30,34 @@ All code changes MUST follow this process:
 
 Three layers enforce TDD:
 - **Skill**: `/opsx:apply` has TDD instructions built in
-- **PreToolUse hook**: Blocks writing `src/**/*.py` if corresponding `tests/test_*.py` doesn't exist
-- **PostToolUse hook**: Auto-runs pytest after writing `src/` files, reports results to agent
+- **PreToolUse hook** (`tdd-guard.sh`): Blocks writing `src/**/*.py` if corresponding `tests/test_*.py` doesn't exist
+- **PostToolUse hook** (`tdd-autotest.sh`): Auto-runs pytest after writing `src/` files, reports results to agent
 
 Files starting with `_` (templates) are exempt from TDD guard.
+
+### OpenSpec Guard
+
+- **PreToolUse hook** (`openspec-guard.sh`): Prompts confirmation when modifying `src/**/*.py` without an active OpenSpec change
+- Soft constraint (`ask` mode) — does not hard block, allows emergency fixes
+- Ensures changes are tracked via OpenSpec before code is modified
+
+### Commit Convention
+
+Git commit messages MUST follow `<type>: <description>` format.
+
+Valid types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
+
+Enforced by `.githooks/commit-msg` hook. After cloning, run:
+```bash
+git config core.hooksPath .githooks
+```
+
+Merge commits and "Initial commit" are exempt.
+
+### CI Status Feedback
+
+- **PostToolUse hook** (`ci-status.sh`): After `git push`, automatically queries GitHub Actions for latest run status
+- Best-effort: requires `GITHUB_TOKEN` env var, skips silently if unavailable
 
 ## Architecture
 
@@ -84,6 +108,15 @@ Use `/formatter:add <platform>` skill for guided workflow, or manually:
 2. Create `tests/formatters/test_{platform}.py` (TDD first)
 3. Add `{PLATFORM}_WEBHOOK` env to `.github/workflows/monitor.yml`
 4. Add secret to GitHub repo settings
+
+## Adding a Monitored Category
+
+Use `/category:add <name> <path>` skill for guided workflow, or manually:
+
+1. Add entry to `CATEGORIES` dict in `src/sitemap.py`
+2. Update tests in `tests/test_sitemap.py`
+3. Update README.md and README_EN.md monitored pages table
+4. Update this file's Architecture section
 
 ## OpenSpec
 

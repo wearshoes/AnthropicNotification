@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Git commit-msg hook: enforce <type>: <description> format.
+# Valid types: feat, fix, docs, refactor, test, chore
+# Merge commits and [skip ci] are exempt.
+
+COMMIT_MSG_FILE="$1"
+COMMIT_MSG=$(head -1 "$COMMIT_MSG_FILE")
+
+# Exempt merge commits
+if [[ "$COMMIT_MSG" =~ ^Merge ]]; then
+    exit 0
+fi
+
+# Exempt initial commit
+if [[ "$COMMIT_MSG" =~ ^Initial ]]; then
+    exit 0
+fi
+
+# Check format: <type>: <description>
+if [[ "$COMMIT_MSG" =~ ^(feat|fix|docs|refactor|test|chore):\ .+ ]]; then
+    exit 0
+fi
+
+echo ""
+echo "ERROR: Invalid commit message format."
+echo ""
+echo "  Got:      $COMMIT_MSG"
+echo "  Expected: <type>: <description>"
+echo ""
+echo "  Valid types: feat, fix, docs, refactor, test, chore"
+echo ""
+echo "  Examples:"
+echo "    feat: add dingtalk formatter"
+echo "    fix: auto-create labels before issue creation"
+echo "    docs: add bilingual README"
+echo "    refactor: extract signing logic"
+echo "    test: add _ensure_label tests"
+echo "    chore: archive change, sync specs"
+echo ""
+exit 1
