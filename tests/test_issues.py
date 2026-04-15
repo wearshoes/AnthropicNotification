@@ -62,19 +62,18 @@ class TestCreateBaselineIssue:
 
     @patch("src.issues.subprocess.run")
     def test_creates_issue_with_correct_labels(self, mock_run):
-        from src.issues import create_baseline_issue
+        from src.issues import create_baseline_issue, _ensured_labels
+        _ensured_labels.clear()
 
         mock_run.return_value = MagicMock(returncode=0, stdout="")
 
         urls = {"https://www.anthropic.com/news/a", "https://www.anthropic.com/news/b"}
         create_baseline_issue("news", urls)
 
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
-        assert "gh" in cmd
-        assert "issue" in cmd
-        assert "create" in cmd
-        # Check labels
+        # Find the issue create call (skip label create calls)
+        create_calls = [c for c in mock_run.call_args_list if "issue" in c[0][0] and "create" in c[0][0]]
+        assert len(create_calls) == 1
+        cmd = create_calls[0][0][0]
         label_idx = cmd.index("--label")
         assert "baseline,news" in cmd[label_idx + 1]
 
@@ -104,28 +103,32 @@ class TestCreateUpdateIssue:
 
     @patch("src.issues.subprocess.run")
     def test_creates_issue_for_new_url(self, mock_run):
-        from src.issues import create_update_issue
+        from src.issues import create_update_issue, _ensured_labels
+        _ensured_labels.clear()
 
         mock_run.return_value = MagicMock(returncode=0, stdout="")
 
         create_update_issue("news", "https://www.anthropic.com/news/new-article")
 
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
-        assert "issue" in cmd
-        assert "create" in cmd
+        # Find the issue create call (skip label create calls)
+        create_calls = [c for c in mock_run.call_args_list if "issue" in c[0][0] and "create" in c[0][0]]
+        assert len(create_calls) == 1
+        cmd = create_calls[0][0][0]
         label_idx = cmd.index("--label")
         assert "news,update" in cmd[label_idx + 1]
 
     @patch("src.issues.subprocess.run")
     def test_title_derived_from_url_slug(self, mock_run):
-        from src.issues import create_update_issue
+        from src.issues import create_update_issue, _ensured_labels
+        _ensured_labels.clear()
 
         mock_run.return_value = MagicMock(returncode=0, stdout="")
 
         create_update_issue("news", "https://www.anthropic.com/news/project-glasswing")
 
-        cmd = mock_run.call_args[0][0]
+        # Find the issue create call
+        create_calls = [c for c in mock_run.call_args_list if "issue" in c[0][0] and "create" in c[0][0]]
+        cmd = create_calls[0][0][0]
         title_idx = cmd.index("--title")
         title = cmd[title_idx + 1]
         assert "project-glasswing" in title.lower() or "Project Glasswing" in title

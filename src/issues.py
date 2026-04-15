@@ -8,6 +8,16 @@ from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
+_ensured_labels: set[str] = set()
+
+
+def _ensure_label(label: str) -> None:
+    """Create a label if it doesn't exist yet (idempotent, cached per run)."""
+    if label in _ensured_labels:
+        return
+    _run_gh(["label", "create", label, "--force"])
+    _ensured_labels.add(label)
+
 
 def _run_gh(args: list[str]) -> subprocess.CompletedProcess:
     """Run a gh CLI command and return the result."""
@@ -49,6 +59,8 @@ def get_baseline_issue(category: str) -> tuple[int | None, set[str]]:
 
 def create_baseline_issue(category: str, urls: set[str]) -> None:
     """Create a new baseline Issue for a category."""
+    _ensure_label("baseline")
+    _ensure_label(category)
     body = "\n".join(sorted(urls))
     _run_gh([
         "issue", "create",
@@ -70,6 +82,8 @@ def update_baseline_issue(issue_number: int, urls: set[str]) -> None:
 
 def create_update_issue(category: str, url: str) -> None:
     """Create an Issue for a newly discovered URL."""
+    _ensure_label(category)
+    _ensure_label("update")
     slug = urlparse(url).path.rstrip("/").split("/")[-1]
     title = f"[{category.capitalize()}] {slug}"
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
