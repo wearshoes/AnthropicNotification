@@ -132,3 +132,81 @@ class TestCreateUpdateIssue:
         title_idx = cmd.index("--title")
         title = cmd[title_idx + 1]
         assert "project-glasswing" in title.lower() or "Project Glasswing" in title
+
+
+class TestEnsureLabel:
+    """Tests for _ensure_label() — idempotent label creation with caching."""
+
+    @patch("src.issues.subprocess.run")
+    def test_creates_label_with_force_flag(self, mock_run):
+        from src.issues import _ensure_label, _ensured_labels
+        _ensured_labels.clear()
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+
+        _ensure_label("baseline")
+
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert "label" in cmd
+        assert "create" in cmd
+        assert "baseline" in cmd
+        assert "--force" in cmd
+
+    @patch("src.issues.subprocess.run")
+    def test_caches_label_avoids_duplicate_call(self, mock_run):
+        from src.issues import _ensure_label, _ensured_labels
+        _ensured_labels.clear()
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+
+        _ensure_label("news")
+        _ensure_label("news")  # second call should be cached
+
+        # Only one subprocess call, not two
+        assert mock_run.call_count == 1
+
+    @patch("src.issues.subprocess.run")
+    def test_different_labels_each_get_created(self, mock_run):
+        from src.issues import _ensure_label, _ensured_labels
+        _ensured_labels.clear()
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+
+        _ensure_label("baseline")
+        _ensure_label("news")
+
+        assert mock_run.call_count == 2
+
+
+class TestRunGhErrorLogging:
+    """Tests for _run_gh() error logging."""
+
+    @patch("src.issues.subprocess.run")
+    def test_logs_error_on_failure(self, mock_run, caplog):
+        import logging
+        from src.issues import _run_gh
+
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stdout="some output",
+            stderr="could not add label: 'baseline' not found",
+        )
+
+        with caplog.at_level(logging.ERROR, logger="src.issues"):
+            _run_gh(["issue", "create", "--title", "test"])
+
+        assert "gh command failed" in caplog.text
+        assert "could not add label" in caplog.text
+
+    @patch("src.issues.subprocess.run")
+    def test_no_log_on_success(self, mock_run, caplog):
+        import logging
+        from src.issues import _run_gh
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
+
+        with caplog.at_level(logging.ERROR, logger="src.issues"):
+            _run_gh(["issue", "list"])
+
+        assert "gh command failed" not in caplog.text
