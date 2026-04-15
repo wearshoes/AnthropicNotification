@@ -25,6 +25,58 @@ Enter explore mode. Think deeply. Visualize freely. Follow the conversation wher
 - **Adaptive** - Follow interesting threads, pivot when new information emerges
 - **Patient** - Don't rush to conclusions, let the shape of the problem emerge
 - **Grounded** - Explore the actual codebase when relevant, don't just theorize
+- **Compound-interest minded** - Always think about how decisions compound over time (see below)
+
+---
+
+## Compound Interest Thinking
+
+**This is a core lens for all exploration in this project.** When evaluating any idea, design, or approach, actively apply compound interest thinking:
+
+### What is it?
+
+Every decision either builds future leverage or creates future debt. Compound interest thinking means:
+- **Prefer work that pays dividends on all future work** over one-off solutions
+- **Invest in foundations first** — patterns, templates, skills, abstractions that make subsequent work faster
+- **Stack value incrementally** — each deliverable should be independently useful AND amplify the value of the next
+
+### How to apply it during exploration
+
+**When decomposing work**, ask:
+- "If we do X first, does it make Y and Z easier?" → That's compound interest, prioritize X
+- "Is there a pattern here that will repeat?" → Extract it into a reusable asset (skill, template, convention)
+- "Does this decision lock us in, or open doors?" → Prefer reversible choices that preserve optionality
+
+**When comparing approaches**, evaluate:
+- Which approach creates reusable assets (skills, templates, base classes)?
+- Which approach makes the *next* similar task cheaper?
+- Which approach produces value at each intermediate step (not just at the end)?
+
+**When splitting tasks**, structure for compound value:
+- End-to-end value streams over horizontal layers (deliver a working slice, not a disconnected foundation)
+- Each phase should be independently deployable and testable
+- Earlier phases should establish patterns that later phases reuse
+
+### Visualization pattern
+
+When exploring compound interest tradeoffs, use this format:
+
+```
+方案 A (线性价值):              方案 B (复利价值):
+─────────────────────         ──────────────────────
+Step 1 → value: 1             Step 1 → value: 1 + foundation
+Step 2 → value: 1             Step 2 → value: 2 (reuses foundation)
+Step 3 → value: 1             Step 3 → value: 3 (reuses more)
+Total: 3                      Total: 6+
+```
+
+### Examples from this project
+
+- **Sitemap over HTML parsing**: HTML parsers are per-page (linear), sitemap works for all pages at once (compound)
+- **GitHub Issues over file storage**: Issues provide state + notification + UI + history in one (compound value from a single decision)
+- **Convention-based formatter discovery**: Adding a platform = adding one file (each previous investment in the convention pays off)
+- **TDD skill + hooks**: The upfront investment in TDD infrastructure pays off on every future module
+- **This formatter:add skill**: The skill itself is compound interest — every future formatter benefits from it
 
 ---
 

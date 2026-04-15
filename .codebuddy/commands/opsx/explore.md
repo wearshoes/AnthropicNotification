@@ -27,6 +27,37 @@ Enter explore mode. Think deeply. Visualize freely. Follow the conversation wher
 - **Adaptive** - Follow interesting threads, pivot when new information emerges
 - **Patient** - Don't rush to conclusions, let the shape of the problem emerge
 - **Grounded** - Explore the actual codebase when relevant, don't just theorize
+- **Compound-interest minded** - Always think about how decisions compound over time (see below)
+
+---
+
+## Compound Interest Thinking
+
+**This is a core lens for all exploration in this project.** When evaluating any idea, design, or approach, actively apply compound interest thinking:
+
+### What is it?
+
+Every decision either builds future leverage or creates future debt. Compound interest thinking means:
+- **Prefer work that pays dividends on all future work** over one-off solutions
+- **Invest in foundations first** — patterns, templates, skills, abstractions that make subsequent work faster
+- **Stack value incrementally** — each deliverable should be independently useful AND amplify the value of the next
+
+### How to apply it during exploration
+
+**When decomposing work**, ask:
+- "If we do X first, does it make Y and Z easier?" → That's compound interest, prioritize X
+- "Is there a pattern here that will repeat?" → Extract it into a reusable asset (skill, template, convention)
+- "Does this decision lock us in, or open doors?" → Prefer reversible choices that preserve optionality
+
+**When comparing approaches**, evaluate:
+- Which approach creates reusable assets (skills, templates, base classes)?
+- Which approach makes the *next* similar task cheaper?
+- Which approach produces value at each intermediate step (not just at the end)?
+
+**When splitting tasks**, structure for compound value:
+- End-to-end value streams over horizontal layers (deliver a working slice, not a disconnected foundation)
+- Each phase should be independently deployable and testable
+- Earlier phases should establish patterns that later phases reuse
 
 ---
 

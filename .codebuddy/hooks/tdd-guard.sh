@@ -17,8 +17,14 @@ print(tool_input.get('file_path', '') or tool_input.get('file_path', ''))
 # Normalize path separators
 FILE_PATH=$(echo "$FILE_PATH" | sed 's|\\|/|g')
 
-# Only guard src/**/*.py files (not __init__.py)
+# Only guard src/**/*.py files (not __init__.py, not _template files)
 if [[ ! "$FILE_PATH" =~ src/.*\.py$ ]] || [[ "$FILE_PATH" =~ __init__\.py$ ]]; then
+    exit 0
+fi
+
+# Skip files starting with _ (templates, internal utilities)
+BASENAME=$(basename "$FILE_PATH")
+if [[ "$BASENAME" == _* ]]; then
     exit 0
 fi
 
