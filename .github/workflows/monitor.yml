@@ -4,6 +4,9 @@ on:
   schedule:
     - cron: '0 */6 * * *'  # Every 6 hours: UTC 00:00, 06:00, 12:00, 18:00
   workflow_dispatch:         # Manual trigger
+  push:
+    branches: [main]
+    paths: ['.github/workflows/monitor.yml']  # Only re-run on workflow changes
 
 permissions:
   issues: write
