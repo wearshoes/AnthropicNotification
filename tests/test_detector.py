@@ -65,18 +65,21 @@ class TestProcessCategory:
         mock_issues.create_update_issue.assert_not_called()
 
     @patch("src.detector.issues")
-    def test_new_urls_create_issues_and_update_baseline(self, mock_issues):
+    def test_new_urls_create_aggregated_issue_and_close_old(self, mock_issues):
         from src.detector import process_category
 
         known = {"https://www.anthropic.com/news/a"}
         mock_issues.get_baseline_issue.return_value = (1, known)
+        mock_issues.create_update_issue.return_value = 7
 
         current_urls = {"https://www.anthropic.com/news/a", "https://www.anthropic.com/news/b"}
 
         new_urls = process_category("news", current_urls)
 
         assert new_urls == {"https://www.anthropic.com/news/b"}
-        mock_issues.create_update_issue.assert_called_once_with("news", "https://www.anthropic.com/news/b")
+        # Called once with the full set of new URLs (not once per URL)
+        mock_issues.create_update_issue.assert_called_once_with("news", {"https://www.anthropic.com/news/b"})
+        mock_issues.close_old_update_issues.assert_called_once_with("news", exclude_number=7)
         mock_issues.update_baseline_issue.assert_called_once_with(1, current_urls)
 
     @patch("src.detector.issues")
@@ -90,4 +93,5 @@ class TestProcessCategory:
 
         assert new_urls == set()
         mock_issues.create_update_issue.assert_not_called()
+        mock_issues.close_old_update_issues.assert_not_called()
         mock_issues.update_baseline_issue.assert_not_called()

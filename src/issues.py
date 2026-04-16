@@ -80,18 +80,59 @@ def update_baseline_issue(issue_number: int, urls: set[str]) -> None:
     ])
 
 
-def create_update_issue(category: str, url: str) -> None:
-    """Create an Issue for a newly discovered URL."""
+def create_update_issue(category: str, urls: set[str]) -> int | None:
+    """Create an aggregated Issue for newly discovered URLs. Returns issue number or None."""
     _ensure_label(category)
     _ensure_label("update")
-    slug = urlparse(url).path.rstrip("/").split("/")[-1]
-    title = f"[{category.capitalize()}] {slug}"
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    body = f"URL: {url}\nDiscovered: {now}\nCategory: {category}"
 
-    _run_gh([
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    if len(urls) == 1:
+        url = next(iter(urls))
+        slug = urlparse(url).path.rstrip("/").split("/")[-1]
+        title = f"[{category.capitalize()}] {slug}"
+    else:
+        title = f"[{category.capitalize()}] {len(urls)} new updates"
+
+    lines = [f"Discovered: {now}", f"Category: {category}", ""]
+    for url in sorted(urls):
+        slug = urlparse(url).path.rstrip("/").split("/")[-1]
+        lines.append(f"- [{slug}]({url})")
+
+    body = "\n".join(lines)
+
+    result = _run_gh([
         "issue", "create",
         "--title", title,
         "--label", f"{category},update",
         "--body", body,
     ])
+
+    # Try to extract issue number from output (gh prints URL like "https://github.com/.../issues/7")
+    if result.returncode == 0 and result.stdout.strip():
+        try:
+            return int(result.stdout.strip().rstrip("/").split("/")[-1])
+        except (ValueError, IndexError):
+            pass
+    return None
+
+
+def close_old_update_issues(category: str, exclude_number: int | None = None) -> None:
+    """Close all open update Issues for a category except the excluded one."""
+    result = _run_gh([
+        "issue", "list",
+        "--label", f"{category},update",
+        "--state", "open",
+        "--json", "number",
+        "--limit", "50",
+    ])
+
+    if result.returncode != 0:
+        return
+
+    issues = json.loads(result.stdout)
+    for issue in issues:
+        num = issue["number"]
+        if num != exclude_number:
+            _run_gh(["issue", "close", str(num)])
+            logger.info(f"Closed old update issue #{num} for {category}")

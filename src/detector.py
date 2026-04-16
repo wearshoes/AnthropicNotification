@@ -27,8 +27,8 @@ def process_category(category: str, current_urls: set[str]) -> set[str]:
         return set()
 
     if new_urls:
-        for url in sorted(new_urls):
-            issues.create_update_issue(category, url)
+        new_issue_number = issues.create_update_issue(category, new_urls)
+        issues.close_old_update_issues(category, exclude_number=new_issue_number)
         issues.update_baseline_issue(issue_number, current_urls)
         logger.info(f"[{category}] Found {len(new_urls)} new URL(s)")
 
