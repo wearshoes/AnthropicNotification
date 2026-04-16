@@ -1,59 +1,35 @@
-## Requirements
+## MODIFIED Requirements
 
-### Requirement: Read baseline Issue
-The system SHALL find the open baseline Issue for a given category by searching for Issues with labels `baseline` and `<category>`. The Issue body contains one URL per line.
+### Requirement: Create update Issue (aggregated)
+The system SHALL create ONE update Issue per category per run, aggregating all new URLs into a single issue body. The title SHALL indicate the count and category.
 
-#### Scenario: Baseline Issue exists
-- **WHEN** an open Issue with labels `baseline,news` exists
-- **THEN** the system SHALL parse its body into a set of URL strings
+#### Scenario: Multiple new URLs in same category
+- **WHEN** 3 new URLs are found for category `news`
+- **THEN** the system SHALL create ONE issue with title `[News] 3 new updates`
+- **AND** the body SHALL list all 3 URLs with their slugs
 
-#### Scenario: Baseline Issue does not exist
-- **WHEN** no open Issue with labels `baseline,news` exists
-- **THEN** the system SHALL return an empty set (first run for this category)
+#### Scenario: Single new URL
+- **WHEN** 1 new URL is found for category `news`
+- **THEN** the system SHALL create ONE issue with title `[News] article-slug`
+- **AND** the body SHALL contain the URL and discovery timestamp
 
-### Requirement: Create baseline Issue
-The system SHALL create a new baseline Issue with labels `baseline` and `<category>`, with the body containing all known URLs (one per line). Labels SHALL be created automatically and idempotently using `gh label create --force` before issue creation.
+### Requirement: Close old update Issues
+After creating a new update Issue for a category, the system SHALL close all previously open update Issues for that same category. Baseline Issues SHALL never be closed.
 
-#### Scenario: First run for a category
-- **WHEN** no baseline Issue exists for category `news`
-- **THEN** the system SHALL create one with title `[Baseline] news` and labels `baseline,news`
-- **AND** the body SHALL contain all current URLs for that category
+#### Scenario: Old update issues exist
+- **WHEN** a new update Issue is created for category `news`
+- **AND** there are 2 previously open Issues with labels `news,update`
+- **THEN** the system SHALL close those 2 old Issues
 
-#### Scenario: Label does not exist
-- **WHEN** the system creates a baseline Issue with label `baseline`
-- **AND** label `baseline` does not exist in the repository
-- **THEN** the system SHALL create the label first, then create the issue
+#### Scenario: No old update issues
+- **WHEN** a new update Issue is created for category `news`
+- **AND** there are no previously open Issues with labels `news,update`
+- **THEN** no close operations are performed
 
-#### Scenario: Label already exists
-- **WHEN** the system creates a baseline Issue with label `baseline`
-- **AND** label `baseline` already exists
-- **THEN** the system SHALL skip label creation (cached) and create the issue
+#### Scenario: Baseline Issues are never closed
+- **WHEN** the system searches for old update Issues to close
+- **THEN** it SHALL only match Issues with BOTH labels `{category}` AND `update`
+- **AND** SHALL NOT close Issues with label `baseline`
 
-### Requirement: Update baseline Issue
-The system SHALL append new URLs to the existing baseline Issue body.
-
-#### Scenario: New URLs discovered
-- **WHEN** 2 new URLs are found for category `news`
-- **THEN** the system SHALL edit the baseline Issue body to include the new URLs
-- **AND** the existing URLs in the body SHALL remain unchanged
-
-### Requirement: Create update Issue
-The system SHALL create a new Issue for each newly discovered URL with labels `<category>` and `update`. Labels SHALL be created automatically before issue creation, same as baseline issues.
-
-#### Scenario: New article discovered
-- **WHEN** a new URL `https://www.anthropic.com/news/new-article` is found
-- **THEN** the system SHALL create an Issue with title derived from the URL slug
-- **AND** labels SHALL be `news,update`
-- **AND** the body SHALL contain the full URL and discovery timestamp
-
-#### Scenario: Update issue with new labels
-- **WHEN** the system creates an update Issue with labels `news,update`
-- **AND** these labels do not exist
-- **THEN** the system SHALL create both labels first, then create the issue
-
-### Requirement: Error logging for gh CLI
-The system SHALL log ERROR with stdout and stderr when any `gh` CLI command fails (non-zero exit code).
-
-#### Scenario: gh command fails
-- **WHEN** a gh CLI command returns non-zero exit code
-- **THEN** the system SHALL log the command, stdout, and stderr at ERROR level
+### Requirement: Issue count steady state
+At steady state, the maximum number of open Issues SHALL be: 4 baseline + at most 4 update (one per category) = 8 total.
