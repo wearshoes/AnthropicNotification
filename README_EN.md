@@ -9,8 +9,10 @@ Monitor [Anthropic](https://www.anthropic.com) website for new content and recei
 - **Sitemap-based** change detection — stable and reliable, no dependency on HTML structure
 - **GitHub Issues** as state storage — no database or external services needed
 - Multi-platform **Webhook notifications** (WeChat Work, DingTalk, Feishu, Slack, Custom)
+- **Page metadata enrichment**: auto-fetches article title, description, and cover image for richer notifications
 - **GitHub Actions** automation, checks every 30 minutes
 - Convention-based **Formatter discovery** — add a notification platform by adding one file
+- **Issue lifecycle management**: only keeps the latest update issue per category, auto-closes old ones
 - Silent baseline creation on first run — no notification flood
 
 ## How It Works
@@ -35,16 +37,20 @@ Monitor [Anthropic](https://www.anthropic.com) website for new content and recei
                     │ found        │
                     └──────┬───────┘
                            │
-                ┌──────────┼──────────┐
-                ▼          ▼          ▼
-         Create Issue  Update     Send Webhook
-         (record)     baseline    (notify)
+              ┌────────────┼────────────┐
+              ▼            ▼            ▼
+       Create agg.    Update       Enrich metadata
+       Issue          baseline     + Send webhook
+       (close old)    (add URLs)   (title/desc/image)
 ```
 
 1. Fetches `https://www.anthropic.com/sitemap.xml` every 30 minutes via GitHub Actions
-2. Filters URLs into 4 categories: news, research, engineering, learn
+2. Filters URLs into 4 categories
 3. Compares against baseline URLs stored in GitHub Issues
-4. For new URLs: creates an Issue + sends aggregated webhook notification
+4. For new URLs:
+   - Creates one aggregated Issue per category, auto-closes old update Issues
+   - Fetches each page's title/description/image metadata
+   - Sends rich notifications with cover images and article titles
 5. First run silently creates the baseline (no notifications)
 
 ## Monitored Pages
@@ -95,8 +101,15 @@ The first run will:
 - **Not send any notifications** (expected — silent baseline creation)
 
 After that, it checks every 30 minutes. When Anthropic publishes new content, you will:
-- Receive a webhook notification
-- See a new update Issue in your repository
+- Receive a rich notification with cover image and article title
+- See an aggregated update Issue (old ones per category auto-closed)
+
+## Supported Platforms
+
+| Platform | Formatter | Message Format | Signing |
+|----------|-----------|---------------|---------|
+| WeChat Work | `wechat_work.py` | News card (image + title) | None |
+| DingTalk | `dingtalk.py` | Markdown link list | HMAC-SHA256 (optional) |
 
 ## Adding a Notification Platform
 
@@ -109,8 +122,11 @@ src/formatters/my_platform.py
 The file must export two functions:
 
 ```python
-def format_message(changes: dict[str, set[str]]) -> dict | None:
-    """Format changes into platform-specific payload."""
+def format_message(changes: dict[str, list[dict]]) -> dict | None:
+    """Format changes into platform-specific payload.
+    
+    changes format: {"news": [{"url": "...", "title": "...", "description": "...", "image": "..."}]}
+    """
     ...
 
 def send(payload: dict, webhook_url: str) -> None:
@@ -122,6 +138,8 @@ Then add `MY_PLATFORM_WEBHOOK` to GitHub Secrets.
 
 The system auto-discovers formatters: filename `my_platform.py` maps to env var `MY_PLATFORM_WEBHOOK`.
 
+See `src/formatters/_template.py` for the full interface contract, and `src/formatters/_styles/` for message style catalogs per platform.
+
 ## Architecture
 
 ```
@@ -129,15 +147,48 @@ src/
 ├── main.py              # Orchestrator: sitemap → detector → issues → notifier
 ├── sitemap.py           # Fetch and parse sitemap.xml, filter by category
 ├── detector.py          # Compare sitemap URLs vs baseline, find new content
-├── issues.py            # GitHub Issues management via gh CLI (baseline + updates)
-├── notifier.py          # Convention-based formatter discovery + dispatch
+├── issues.py            # GitHub Issues via gh CLI (baseline + updates + auto-close)
+├── enrichment.py        # Fetch page metadata (og:title, og:description, og:image)
+├── notifier.py          # Convention-based formatter discovery + enrichment + dispatch
 └── formatters/
-    └── wechat_work.py   # WeChat Work markdown formatter
+    ├── _template.py     # Formatter code template
+    ├── _styles/         # Message style catalogs per platform
+    │   ├── wechat_work.md
+    │   ├── dingtalk.md
+    │   ├── feishu.md
+    │   └── slack.md
+    ├── wechat_work.py   # WeChat Work news card formatter
+    └── dingtalk.py      # DingTalk markdown formatter (HMAC-SHA256 signing)
 
-tests/                   # Unit tests (pytest, 45 tests)
+tests/                   # Unit tests (pytest, 68 tests)
 .github/workflows/
     └── monitor.yml      # GitHub Actions workflow (every 30 minutes)
+.githooks/
+    └── commit-msg       # Git commit message format validation
 ```
+
+## CodeBuddy Skills
+
+This project integrates [CodeBuddy Code](https://cnb.cool/codebuddy/codebuddy-code) Skills for automated development workflows:
+
+| Command | Description |
+|---------|-------------|
+| `/formatter:add <platform>` | Add a notification platform with full OpenSpec + TDD workflow, including message style selection |
+| `/category:add <name> <path>` | Add a monitored category, updating code + tests + docs |
+| `/opsx:explore` | Enter explore mode — think through problems with compound interest lens |
+| `/opsx:propose` | Create an OpenSpec change proposal (proposal → specs → design → tasks) |
+| `/opsx:apply` | Implement change tasks with TDD (RED → GREEN → REFACTOR) |
+| `/opsx:archive` | Archive change, sync specs, commit and push |
+
+### Workflow Guard Hooks
+
+| Hook | Type | Purpose |
+|------|------|---------|
+| `tdd-guard.sh` | PreToolUse | Requires test file before writing to src/ |
+| `tdd-autotest.sh` | PostToolUse | Auto-runs pytest after writing src/ files |
+| `openspec-guard.sh` | PreToolUse | Reminds to create OpenSpec change before modifying src/ |
+| `ci-status.sh` | PostToolUse | Auto-queries GitHub Actions status after git push |
+| `commit-msg` | Git Hook | Enforces `<type>: <description>` commit format |
 
 ## Local Development
 
@@ -145,11 +196,22 @@ tests/                   # Unit tests (pytest, 45 tests)
 # Install dependencies
 pip install -r requirements.txt
 
+# Configure git hooks (commit message validation)
+git config core.hooksPath .githooks
+
 # Run tests
 python -m pytest tests/ -v
 
 # Fetch sitemap only (no detection or notification)
 python -m src.main --dry-run
+```
+
+### Commit Convention
+
+```
+<type>: <description>
+
+type: feat | fix | docs | refactor | test | chore
 ```
 
 ## License
