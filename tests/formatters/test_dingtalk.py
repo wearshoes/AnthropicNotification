@@ -5,13 +5,15 @@ from unittest.mock import patch, MagicMock
 
 
 class TestFormatMessage:
-    """Tests for format_message()."""
+    """Tests for format_message() — enriched input."""
 
     def test_formats_single_category(self):
         from src.formatters.dingtalk import format_message
 
         changes = {
-            "news": {"https://www.anthropic.com/news/project-glasswing"},
+            "news": [
+                {"url": "https://www.anthropic.com/news/project-glasswing", "title": "Project Glasswing", "description": "A new initiative.", "image": None},
+            ],
         }
 
         payload = format_message(changes)
@@ -19,14 +21,14 @@ class TestFormatMessage:
         assert payload["msgtype"] == "markdown"
         assert "title" in payload["markdown"]
         assert "text" in payload["markdown"]
-        assert "project-glasswing" in payload["markdown"]["text"]
+        assert "Project Glasswing" in payload["markdown"]["text"]
 
     def test_formats_multiple_categories(self):
         from src.formatters.dingtalk import format_message
 
         changes = {
-            "news": {"https://www.anthropic.com/news/a"},
-            "research": {"https://www.anthropic.com/research/b"},
+            "news": [{"url": "https://www.anthropic.com/news/a", "title": "News A", "description": None, "image": None}],
+            "research": [{"url": "https://www.anthropic.com/research/b", "title": "Research B", "description": None, "image": None}],
         }
 
         payload = format_message(changes)
@@ -45,7 +47,7 @@ class TestFormatMessage:
     def test_title_is_summary(self):
         from src.formatters.dingtalk import format_message
 
-        changes = {"news": {"https://www.anthropic.com/news/a"}}
+        changes = {"news": [{"url": "https://www.anthropic.com/news/a", "title": "Article A", "description": None, "image": None}]}
 
         payload = format_message(changes)
 

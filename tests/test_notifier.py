@@ -51,8 +51,15 @@ class TestDiscoverFormatters:
 class TestSendNotifications:
     """Tests for send_notifications()."""
 
-    def test_aggregates_and_sends_to_all_formatters(self):
+    @patch("src.notifier.enrich_urls")
+    def test_enriches_and_sends_to_all_formatters(self, mock_enrich):
         from src.notifier import send_notifications
+
+        enriched = {
+            "news": [{"url": "https://www.anthropic.com/news/a", "title": "A", "description": None, "image": None}],
+            "research": [{"url": "https://www.anthropic.com/research/b", "title": "B", "description": None, "image": None}],
+        }
+        mock_enrich.return_value = enriched
 
         mock_formatter = {
             "name": "test_platform",
@@ -69,11 +76,15 @@ class TestSendNotifications:
 
         send_notifications([mock_formatter], changes)
 
-        mock_formatter["module"].format_message.assert_called_once_with(changes)
+        mock_enrich.assert_called_once_with(changes)
+        mock_formatter["module"].format_message.assert_called_once_with(enriched)
         mock_formatter["module"].send.assert_called_once_with({"msg": "test"}, "https://example.com/hook")
 
-    def test_one_failure_does_not_block_others(self):
+    @patch("src.notifier.enrich_urls")
+    def test_one_failure_does_not_block_others(self, mock_enrich):
         from src.notifier import send_notifications
+
+        mock_enrich.return_value = {"news": [{"url": "u", "title": "t", "description": None, "image": None}]}
 
         failing_formatter = {
             "name": "failing",
@@ -92,10 +103,8 @@ class TestSendNotifications:
 
         changes = {"news": {"https://www.anthropic.com/news/a"}}
 
-        # Should not raise
         send_notifications([failing_formatter, passing_formatter], changes)
 
-        # Passing formatter should still have been called
         passing_formatter["module"].send.assert_called_once()
 
     def test_empty_changes_skips_notifications(self):

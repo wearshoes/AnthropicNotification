@@ -5,6 +5,8 @@ import logging
 import os
 from pathlib import Path
 
+from src.enrichment import enrich_urls
+
 logger = logging.getLogger(__name__)
 
 FORMATTERS_DIR = Path(__file__).parent / "formatters"
@@ -45,13 +47,15 @@ def discover_formatters() -> list[dict]:
 
 
 def send_notifications(formatters: list[dict], changes: dict[str, set[str]]) -> None:
-    """Send aggregated notification to all enabled formatters."""
+    """Enrich URLs and send notifications to all enabled formatters."""
     if not changes:
         return
 
+    enriched = enrich_urls(changes)
+
     for formatter in formatters:
         try:
-            payload = formatter["module"].format_message(changes)
+            payload = formatter["module"].format_message(enriched)
             if payload is not None:
                 formatter["module"].send(payload, formatter["webhook_url"])
                 logger.info(f"Sent notification via {formatter['name']}")

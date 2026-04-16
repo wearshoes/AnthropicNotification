@@ -67,10 +67,11 @@ src/
 ├── sitemap.py           # Fetch/parse sitemap.xml, filter by category
 ├── detector.py          # Compare sitemap URLs vs baseline, find new content
 ├── issues.py            # GitHub Issues via gh CLI (baseline + update issues)
-├── notifier.py          # Convention-based formatter discovery + dispatch
+├── enrichment.py        # Fetch page metadata (og:title, og:description, og:image)
+├── notifier.py          # Convention-based formatter discovery + enrichment + dispatch
 └── formatters/
     ├── _template.py     # Reference template for new formatters
-    ├── wechat_work.py   # WeChat Work markdown formatter
+    ├── wechat_work.py   # WeChat Work news card formatter
     └── dingtalk.py      # DingTalk markdown formatter with HMAC-SHA256 signing
 ```
 

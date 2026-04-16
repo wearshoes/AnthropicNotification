@@ -18,21 +18,24 @@ from urllib.parse import urlparse
 import requests
 
 
-def format_message(changes: dict[str, set[str]]) -> dict | None:
+def format_message(changes: dict[str, list[dict]]) -> dict | None:
     """Format detected changes into a platform-specific message payload.
 
     Args:
-        changes: Dict mapping category name to set of new URLs.
-                 Example: {"news": {"https://www.anthropic.com/news/article-1"},
-                           "research": {"https://www.anthropic.com/research/paper-1"}}
+        changes: Dict mapping category name to list of enriched dicts.
+                 Each dict has: url, title, description (or None), image (or None).
+                 Example: {"news": [
+                     {"url": "https://...", "title": "Article Title",
+                      "description": "Summary text.", "image": "https://...png"},
+                 ]}
 
     Returns:
         Platform-specific payload dict ready to POST, or None if nothing to send.
 
     Notes:
         - Multiple categories may have updates in a single run
-        - URLs are the only guaranteed data; title/date are NOT available
-        - The slug (last path segment) can be used as a display name
+        - Each item has: url, title, description (may be None), image (may be None)
+        - title is extracted from og:title or falls back to URL slug
         - Check your platform's message size limits and truncate accordingly
     """
     if not changes:
@@ -40,20 +43,19 @@ def format_message(changes: dict[str, set[str]]) -> dict | None:
 
     # --- Build message content ---
     lines = []
-    for category, urls in sorted(changes.items()):
-        if not urls:
+    for category, items in sorted(changes.items()):
+        if not items:
             continue
         lines.append(f"**{category.capitalize()}**:")
-        for url in sorted(urls):
-            slug = urlparse(url).path.rstrip("/").split("/")[-1]
-            lines.append(f"  - [{slug}]({url})")
+        for item in items:
+            lines.append(f"  - [{item['title']}]({item['url']})")
 
     content = "\n".join(lines)
 
     # --- Build platform-specific payload ---
     # Replace this with your platform's expected format:
     #
-    #   WeChat Work: {"msgtype": "markdown", "markdown": {"content": ...}}
+    #   WeChat Work: {"msgtype": "news", "news": {"articles": [{title, description, url, picurl}]}}
     #   DingTalk:    {"msgtype": "markdown", "markdown": {"title": ..., "text": ...}}
     #   Feishu:      {"msg_type": "interactive", "card": {...}}
     #   Slack:       {"blocks": [...]}

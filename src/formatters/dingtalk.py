@@ -21,20 +21,21 @@ def _compute_sign(timestamp: int, secret: str) -> str:
     return quote_plus(base64.b64encode(hmac_code).decode("utf-8"))
 
 
-def format_message(changes: dict[str, set[str]]) -> dict | None:
-    """Format changes into a DingTalk markdown message payload."""
+def format_message(changes: dict[str, list[dict]]) -> dict | None:
+    """Format enriched changes into a DingTalk markdown message payload."""
     if not changes:
         return None
 
     lines = ["## Anthropic Website Update\n"]
 
-    for category, urls in sorted(changes.items()):
-        if not urls:
+    for category, items in sorted(changes.items()):
+        if not items:
             continue
         lines.append(f"**{category.capitalize()}**:\n")
-        for url in sorted(urls):
-            slug = urlparse(url).path.rstrip("/").split("/")[-1]
-            lines.append(f"- [{slug}]({url})")
+        for item in items:
+            title = item["title"]
+            url = item["url"]
+            lines.append(f"- [{title}]({url})")
         lines.append("")
 
     text = "\n".join(lines)

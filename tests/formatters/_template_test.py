@@ -25,23 +25,24 @@ class TestFormatMessage:
         from src.formatters._template import format_message
 
         changes = {
-            "news": {"https://www.anthropic.com/news/project-glasswing"},
+            "news": [
+                {"url": "https://www.anthropic.com/news/project-glasswing", "title": "Project Glasswing", "description": None, "image": None},
+            ],
         }
 
         payload = format_message(changes)
 
         # Adjust these assertions for your platform's payload format:
         assert payload is not None
-        # Example for markdown-based platforms:
-        assert "project-glasswing" in str(payload)
+        assert "Project Glasswing" in str(payload)
         assert "news" in str(payload).lower()
 
     def test_formats_multiple_categories(self):
         from src.formatters._template import format_message
 
         changes = {
-            "news": {"https://www.anthropic.com/news/a"},
-            "research": {"https://www.anthropic.com/research/b"},
+            "news": [{"url": "https://www.anthropic.com/news/a", "title": "A", "description": None, "image": None}],
+            "research": [{"url": "https://www.anthropic.com/research/b", "title": "B", "description": None, "image": None}],
         }
 
         payload = format_message(changes)
