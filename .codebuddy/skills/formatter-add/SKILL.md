@@ -33,20 +33,50 @@ Announce these to the user before proceeding.
 
 ---
 
-## Step 2: Research Platform API
+## Step 2: Choose Message Style
 
-Use WebFetch or WebSearch to find the platform's webhook API documentation:
+Check if a style catalog exists for this platform:
+```
+src/formatters/_styles/{platform}.md
+```
 
-- Message payload format (markdown, card, blocks, JSON)
-- Authentication method (none, HMAC-SHA256, bearer token)
-- Message size limits
-- Rate limits
-- Required fields
+**If catalog exists:**
 
-Summarize findings before proceeding. Key questions:
+1. Read the catalog file
+2. Present all predefined styles to the user using **AskUserQuestion tool**:
+   - List each style's name, description, and ASCII effect preview
+   - Always include a "Custom" option at the end
+3. User selects a style → proceed with that style's payload template
+
+**If catalog does NOT exist:**
+
+1. Skip directly to the "Custom" flow below
+
+**If user selects "Custom":**
+
+1. Research the platform's webhook API using WebFetch/WebSearch:
+   - Message payload formats
+   - Authentication method (none, HMAC-SHA256, bearer token)
+   - Message size limits and rate limits
+2. Design 2-3 candidate styles based on the API
+3. If user provides a webhook URL, send preview messages for each candidate
+4. User picks one
+5. After implementation is complete, ask:
+   "Want to save this style to the catalog for future use?"
+   - If yes → append to `src/formatters/_styles/{platform}.md`
+   - If no → proceed without saving
+
+---
+
+## Step 3: Research Platform API
+
+Based on the chosen style, confirm:
 - Does it need request signing? → Need `{PLATFORM}_SECRET` env var
-- What message format does it use? → Determines format_message() output
 - Any size limits? → Need truncation logic
+- Any special fields beyond what the style template shows?
+
+If "Custom" was chosen, this is where the full API research happens.
+If a predefined style was chosen, the payload template is already known — just verify any auth requirements.
 
 ---
 

@@ -71,6 +71,11 @@ src/
 ├── notifier.py          # Convention-based formatter discovery + enrichment + dispatch
 └── formatters/
     ├── _template.py     # Reference template for new formatters
+    ├── _styles/         # Message style catalogs per platform
+    │   ├── wechat_work.md
+    │   ├── dingtalk.md
+    │   ├── feishu.md
+    │   └── slack.md
     ├── wechat_work.py   # WeChat Work news card formatter
     └── dingtalk.py      # DingTalk markdown formatter with HMAC-SHA256 signing
 ```
