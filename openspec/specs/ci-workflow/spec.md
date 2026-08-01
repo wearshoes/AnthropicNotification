@@ -1,34 +1,29 @@
 ## Requirements
 
-### Requirement: Scheduled execution
-The workflow SHALL run on a cron schedule every 30 minutes and support manual trigger via `workflow_dispatch`. It SHALL also trigger on push to main when the workflow file itself changes.
-
-#### Scenario: Cron trigger
-- **WHEN** the cron schedule fires every 30 minutes
-- **THEN** the workflow SHALL execute the monitoring script
+### Requirement: Best-effort scheduled execution
+The workflow SHALL request execution every 30 minutes and support manual execution. Documentation SHALL describe GitHub's cron scheduling as best-effort rather than guaranteed.
 
 #### Scenario: Manual trigger
-- **WHEN** a user triggers `workflow_dispatch`
-- **THEN** the workflow SHALL execute the monitoring script
+- **WHEN** a user invokes `workflow_dispatch`
+- **THEN** the monitor workflow SHALL execute
 
-#### Scenario: Push trigger on workflow change
-- **WHEN** `.github/workflows/monitor.yml` is modified and pushed to main
-- **THEN** the workflow SHALL execute
+### Requirement: Single bounded monitor writer
+All monitor triggers SHALL share one concurrency group with active-run cancellation disabled. The monitor job SHALL have a finite timeout and SHALL run tests before production execution.
 
-### Requirement: Inject secrets as environment variables
-The workflow SHALL pass all notification webhook secrets as environment variables to the Python script. The naming convention SHALL be `<PLATFORM>_WEBHOOK` and `<PLATFORM>_SECRET`.
+#### Scenario: Schedule and manual trigger overlap
+- **WHEN** a scheduled run is active and a manual run starts
+- **THEN** only one run SHALL mutate Issue state at a time
 
-#### Scenario: Secret exists
-- **WHEN** GitHub Secret `WECHAT_WORK_WEBHOOK` is configured
-- **THEN** the environment variable `WECHAT_WORK_WEBHOOK` SHALL be available to the script
+### Requirement: Minimum permissions and implemented secrets
+The workflow SHALL request only `issues: write` and `contents: read`. It SHALL inject credentials only for notification platforms implemented by the repository.
 
-#### Scenario: Secret does not exist
-- **WHEN** GitHub Secret `WECHAT_WORK_WEBHOOK` is not configured
-- **THEN** the environment variable `WECHAT_WORK_WEBHOOK` SHALL be empty or unset
+#### Scenario: Unsupported platform secret
+- **WHEN** no formatter implementation exists for a platform
+- **THEN** the workflow SHALL NOT imply support by injecting that platform's secret
 
-### Requirement: Permissions
-The workflow SHALL request only the minimum required permissions: `issues: write` for Issue management, `contents: read` for checkout.
+### Requirement: Immutable action references
+Every third-party GitHub Action SHALL be referenced by a full commit SHA.
 
-#### Scenario: Issue creation succeeds
-- **WHEN** the script creates an Issue via `gh` CLI
-- **THEN** it SHALL succeed with the granted `GITHUB_TOKEN` permissions
+#### Scenario: Action major tag moves
+- **WHEN** an upstream action changes a movable major-version tag
+- **THEN** the monitor SHALL continue using its reviewed commit until this repository updates it explicitly

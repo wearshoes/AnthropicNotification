@@ -1,68 +1,93 @@
-"""Fetch page metadata (og:title, og:description, og:image) for URL enrichment."""
+"""Fetch page metadata while preventing redirects outside Anthropic."""
+
+from __future__ import annotations
 
 import logging
 import re
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
+from bs4 import BeautifulSoup
+
+from src.sitemap import canonicalize_url
+
 
 logger = logging.getLogger(__name__)
-
+MAX_REDIRECTS = 5
 GENERIC_DESCRIPTIONS = {
-    "anthropic is an ai safety",
+    "Anthropic is an AI safety and research company that's working to build reliable, interpretable, and steerable AI systems.",
 }
 
 
-def _parse_meta(html: str) -> dict[str, str | None]:
-    """Extract og:title, og:description, og:image and <title> from HTML."""
-    og = {}
-    for m in re.finditer(r'<meta\s+[^>]*?property=["\']og:(\w+)["\'][^>]*?content=["\']([^"\']*)["\']', html, re.I):
-        og[m.group(1)] = m.group(2)
-    for m in re.finditer(r'<meta\s+[^>]*?content=["\']([^"\']*)["\'][^>]*?property=["\']og:(\w+)["\']', html, re.I):
-        og[m.group(2)] = m.group(1)
-
-    title_match = re.search(r'<title[^>]*>(.*?)</title>', html, re.DOTALL)
-    page_title = title_match.group(1).strip() if title_match else None
-
-    return {
-        "og_title": og.get("title"),
-        "og_description": og.get("description"),
-        "og_image": og.get("image"),
-        "page_title": page_title,
-    }
+def _slug_title(url: str) -> str:
+    return urlparse(url).path.rstrip("/").split("/")[-1] or url
 
 
-def _is_generic_description(desc: str | None) -> bool:
-    """Check if description is a generic company boilerplate."""
-    if not desc:
-        return True
-    lower = desc.lower().strip()
-    return any(lower.startswith(g) for g in GENERIC_DESCRIPTIONS)
+def _status_code(response) -> int:
+    status = getattr(response, "status_code", 200)
+    return status if isinstance(status, int) else 200
+
+
+def _get_trusted_page(url: str):
+    current = canonicalize_url(url)
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; AnthropicNotification/1.0)"}
+    for _ in range(MAX_REDIRECTS + 1):
+        response = requests.get(
+            current,
+            headers=headers,
+            timeout=15,
+            allow_redirects=False,
+        )
+        status = _status_code(response)
+        if status not in (301, 302, 303, 307, 308):
+            response.raise_for_status()
+            return response
+        location = response.headers.get("Location")
+        if not location:
+            raise requests.exceptions.TooManyRedirects("redirect response has no Location")
+        current = canonicalize_url(urljoin(current, location))
+    raise requests.exceptions.TooManyRedirects("too many page redirects")
+
+
+def _meta_content(soup: BeautifulSoup, property_name: str) -> str | None:
+    element = soup.find("meta", attrs={"property": property_name})
+    if not element:
+        return None
+    value = element.get("content")
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 def enrich_url(url: str) -> dict:
-    """Fetch a URL and extract metadata. Falls back to slug on failure."""
-    slug = urlparse(url).path.rstrip("/").split("/")[-1]
-
+    """Return a stable metadata snapshot, falling back to the URL slug."""
+    fallback = {
+        "url": url,
+        "title": _slug_title(url),
+        "description": None,
+        "image": None,
+    }
     try:
-        response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
-        response.raise_for_status()
-        meta = _parse_meta(response.text[:30000])
-
-        title = meta["og_title"] or meta["page_title"] or slug
-        description = meta["og_description"] if not _is_generic_description(meta["og_description"]) else None
-        image = meta["og_image"]
-
-        return {"url": url, "title": title, "description": description, "image": image}
-
-    except Exception as e:
-        logger.warning(f"Failed to enrich {url}: {e}")
-        return {"url": url, "title": slug, "description": None, "image": None}
+        response = _get_trusted_page(url)
+        soup = BeautifulSoup(response.text, "lxml")
+        title = _meta_content(soup, "og:title")
+        if not title and soup.title and soup.title.string:
+            title = re.sub(r"\s*\|\s*Anthropic\s*$", "", soup.title.string.strip())
+        description = _meta_content(soup, "og:description")
+        if description in GENERIC_DESCRIPTIONS:
+            description = None
+        return {
+            "url": url,
+            "title": title or fallback["title"],
+            "description": description,
+            "image": _meta_content(soup, "og:image"),
+        }
+    except Exception as exc:
+        logger.warning("Failed to enrich %s: %s", url, exc)
+        return fallback
 
 
 def enrich_urls(changes: dict[str, set[str]]) -> dict[str, list[dict]]:
-    """Enrich all URLs in changes dict. Returns dict[category, list[enriched_dict]]."""
-    result = {}
-    for category, urls in changes.items():
-        result[category] = [enrich_url(url) for url in sorted(urls)]
-    return result
+    """Enrich every URL in deterministic category and URL order."""
+    return {
+        category: [enrich_url(url) for url in sorted(urls)]
+        for category, urls in sorted(changes.items())
+    }

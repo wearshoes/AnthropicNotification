@@ -1,129 +1,124 @@
 # CODEBUDDY.md
 
-This file provides guidance to CodeBuddy Code when working with code in this repository.
-
-## Project Overview
-
-Anthropic website monitor: detect new content via sitemap.xml, store state in GitHub Issues, send webhook notifications. Runs on GitHub Actions every 30 minutes.
+This repository monitors Anthropic's sitemap, stores durable state in GitHub Issues, and sends WeChat Work or DingTalk webhook notifications.
 
 ## Compound Interest Principle
 
-**This is the core design philosophy of this project.** Every decision should be evaluated through compound interest thinking:
+- Prefer reusable assets over one-off fixes.
+- Deliver end-to-end slices that make later work cheaper.
+- Extract a shared pattern when it repeats.
+- Evaluate changes against the reliability contract below, not only the happy path.
 
-- **Prefer work that creates reusable assets** (skills, templates, conventions) over one-off solutions
-- **Stack value incrementally**: each deliverable should be independently useful AND amplify the next
-- **End-to-end value streams over horizontal layers**: deliver working slices, not disconnected foundations
-- **Extract patterns when they repeat**: if you do something twice, the third time should be a skill or template
+## Required Development Workflow
 
-When decomposing work, always ask: "Does this make the next task cheaper?"
+All code changes follow:
 
-## Development Workflow
+1. Explore the behavior and failure modes.
+2. Create an OpenSpec change with proposal, specs, design, and tasks.
+3. Apply with strict TDD: RED, GREEN, REFACTOR.
+4. Sync main specs and archive the completed change.
 
-All code changes MUST follow this process:
+### Repository Guards
 
-1. **Explore** (`/opsx:explore`): Think through the problem with compound interest lens
-2. **Propose** (`/opsx:propose`): Create OpenSpec change with proposal → specs → design → tasks
-3. **Apply** (`/opsx:apply`): Implement with TDD (RED → GREEN → REFACTOR) enforced by hooks
-4. **Archive** (`/opsx:archive`): Sync specs and archive the change
+- `tdd-guard.sh` requires the corresponding test before writing `src/**/*.py`.
+- `tdd-autotest.sh` runs pytest after source edits.
+- `openspec-guard.sh` checks for an active OpenSpec change.
+- `.githooks/commit-msg` requires `<type>: <description>`.
+- Valid commit types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`.
 
-### TDD Enforcement
+## Reliability Contract
 
-Three layers enforce TDD:
-- **Skill**: `/opsx:apply` has TDD instructions built in
-- **PreToolUse hook** (`tdd-guard.sh`): Blocks writing `src/**/*.py` if corresponding `tests/test_*.py` doesn't exist
-- **PostToolUse hook** (`tdd-autotest.sh`): Auto-runs pytest after writing `src/` files, reports results to agent
+The system guarantees durable at-least-once delivery, not exactly-once delivery.
 
-Files starting with `_` (templates) are exempt from TDD guard.
+Required state order:
 
-### OpenSpec Guard
-
-- **PreToolUse hook** (`openspec-guard.sh`): Prompts confirmation when modifying `src/**/*.py` without an active OpenSpec change
-- Soft constraint (`ask` mode) — does not hard block, allows emergency fixes
-- Ensures changes are tracked via OpenSpec before code is modified
-
-### Commit Convention
-
-Git commit messages MUST follow `<type>: <description>` format.
-
-Valid types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
-
-Enforced by `.githooks/commit-msg` hook. After cloning, run:
-```bash
-git config core.hooksPath .githooks
+```text
+persist and verify outbox event
+    -> write and verify monotonic baseline union
+    -> deliver fixed payload chunks
+    -> write and verify each receipt
+    -> finalize labels and display Issues
 ```
 
-Merge commits and "Initial commit" are exempt.
-
-### CI Status Feedback
-
-- **PostToolUse hook** (`ci-status.sh`): After `git push`, automatically queries GitHub Actions for latest run status
-- Best-effort: requires `GITHUB_TOKEN` env var, skips silently if unavailable
+- `item_id` is stable per versioned category and canonical URL.
+- An event snapshots targets, non-secret destination fingerprints, formatter versions, item ordering, chunk membership, and payloads.
+- Planning recursively splits batches that would exceed the GitHub Issue body limit.
+- A receipted chunk is never sent again.
+- A crash after webhook success but before receipt persistence may duplicate that chunk.
+- Every GitHub command error, timeout, malformed response, or failed verification aborts state progress.
+- A new delta with no enabled formatter is blocked before outbox creation or baseline progress.
+- Pending events repair their category baseline before delivery and drain before sitemap fetching.
+- Baselines only grow; every accepted sitemap snapshot has all configured categories non-empty and at least 300 monitored URLs in total.
+- Workflow concurrency provides one Issue-state writer.
 
 ## Architecture
 
-```
+```text
 src/
-├── main.py              # Orchestrator: sitemap → detector → issues → notifier
-├── sitemap.py           # Fetch/parse sitemap.xml, filter by category
-├── detector.py          # Compare sitemap URLs vs baseline, find new content
-├── issues.py            # GitHub Issues via gh CLI (baseline + update issues)
-├── enrichment.py        # Fetch page metadata (og:title, og:description, og:image)
-├── notifier.py          # Convention-based formatter discovery + enrichment + dispatch
+├── main.py              # Pending recovery, snapshot ingestion, finalization
+├── sitemap.py           # Trusted fetch, canonicalization, category filtering
+├── detector.py          # Snapshot guard and outbox-before-baseline ordering
+├── outbox.py            # Stable IDs, fixed chunks, serialization, receipts
+├── issues.py            # Fail-closed and verified GitHub Issue operations
+├── enrichment.py        # Metadata snapshot with redirect validation
+├── notifier.py          # Formatter discovery, event planning, chunk delivery
+├── webhook_http.py      # Bounded retry and business-status validation
 └── formatters/
-    ├── _template.py     # Reference template for new formatters
-    ├── _styles/         # Message style catalogs per platform
-    │   ├── wechat_work.md
-    │   ├── dingtalk.md
-    │   ├── feishu.md
-    │   └── slack.md
-    ├── wechat_work.py   # WeChat Work news card formatter
-    └── dingtalk.py      # DingTalk markdown formatter with HMAC-SHA256 signing
+    ├── _template.py
+    ├── wechat_work.py
+    └── dingtalk.py
 ```
 
-## Key Conventions
+## Formatter Contract
 
-### Formatter Discovery
-- `src/formatters/{name}.py` → auto-discovered by `notifier.py`
-- Env var `{NAME}_WEBHOOK` exists → formatter is enabled
-- Each formatter exports: `format_message(changes) -> dict | None` and `send(payload, webhook_url) -> None`
-- Files starting with `_` are skipped (templates)
+`src/formatters/{name}.py` maps to `{NAME}_WEBHOOK`. Files starting with `_` are not discovered.
 
-### GitHub Issues as State
-- One open baseline Issue per category (labels: `baseline,{category}`)
-- New content creates update Issues (labels: `{category},update`)
-- Labels are auto-created via `gh label create --force`
+Each formatter exports:
 
-### Test Structure
-- `src/{module}.py` → `tests/test_{module}.py`
-- `src/formatters/{name}.py` → `tests/formatters/test_{name}.py`
-- Use `pytest` style, mock external dependencies (HTTP, subprocess)
+```python
+FORMATTER_VERSION = 1
+MAX_ITEMS_PER_MESSAGE = 10
 
-## Commands
+def format_message(changes: dict[str, list[dict]]) -> dict | None: ...
+def send(payload: dict, webhook_url: str) -> None: ...
+```
+
+- `format_message()` receives one bounded enriched chunk.
+- `send()` returns only after HTTP and platform business status both confirm success.
+- Adding a formatter also requires its webhook environment variable in `.github/workflows/monitor.yml`.
+- A formatter contract change increments `FORMATTER_VERSION`; old pending versions must remain supportable or be resolved explicitly.
+- Changing a webhook URL changes its destination fingerprint and blocks delivery of old pending chunks.
+
+## GitHub Issues
+
+- Baseline labels: `baseline,{category}`.
+- Pending outbox labels: `{category},update,notification-pending`.
+- Delivered outbox label: `notification-delivered`.
+- Issue bodies contain a human-readable section and a machine-owned JSON marker.
+- Never edit or truncate the machine marker manually.
+- Cleanup must never close an Issue still labeled `notification-pending`.
+
+## Tests
+
+- `src/{module}.py` maps to `tests/test_{module}.py`.
+- `src/formatters/{name}.py` maps to `tests/formatters/test_{name}.py`.
+- Mock external HTTP and subprocess calls.
+- Cover crash windows, partial target success, business-level webhook errors, and write verification.
 
 ```bash
-python -m pytest tests/ -v          # Run all tests
-python -m src.main --dry-run        # Fetch sitemap only (no detection/notification)
-python -m src.main                  # Full run (needs gh CLI + GH_TOKEN)
+python -m pytest tests -v
+python -m pytest tests --cov=src --cov-report=term-missing
+python -m src.main --dry-run
+python -m src.main  # requires gh and GH_TOKEN
 ```
 
-## Adding a Notification Platform
+## Adding a Category
 
-Use `/formatter:add <platform>` skill for guided workflow, or manually:
-
-1. Create `src/formatters/{platform}.py` (reference `_template.py`)
-2. Create `tests/formatters/test_{platform}.py` (TDD first)
-3. Add `{PLATFORM}_WEBHOOK` env to `.github/workflows/monitor.yml`
-4. Add secret to GitHub repo settings
-
-## Adding a Monitored Category
-
-Use `/category:add <name> <path>` skill for guided workflow, or manually:
-
-1. Add entry to `CATEGORIES` dict in `src/sitemap.py`
-2. Update tests in `tests/test_sitemap.py`
-3. Update README.md and README_EN.md monitored pages table
-4. Update this file's Architecture section
+1. Add its path prefix to `CATEGORIES` in `src/sitemap.py`.
+2. Write sitemap and snapshot-guard tests first.
+3. Update both READMEs and OpenSpec.
+4. Ensure first-run and empty-category baseline behavior remains explicit.
 
 ## OpenSpec
 
-Specs live in `openspec/specs/`, archived changes in `openspec/changes/archive/`. Always sync delta specs to main specs before archiving.
+Main specs live in `openspec/specs/`. Completed changes move to `openspec/changes/archive/` only after delta specs are synced and verification passes.

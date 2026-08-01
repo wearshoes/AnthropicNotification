@@ -1,40 +1,42 @@
-## ADDED Requirements
+## Requirements
 
-### Requirement: Discover formatters by convention
-The system SHALL scan the `src/formatters/` directory and load formatter modules. A file named `<platform>.py` that exports `format_message(category, urls)` and `send(payload, webhook_url)` SHALL be registered as a formatter for `<platform>`. Files starting with `_` or named `__init__.py` SHALL be skipped.
+### Requirement: Discover implemented formatters by convention
+The system SHALL load non-underscore modules in `src/formatters/` only when their `<PLATFORM>_WEBHOOK` environment variable is configured and the formatter is not explicitly disabled.
 
-#### Scenario: Formatter file exists with matching env var
-- **WHEN** `src/formatters/wechat_work.py` exists
-- **AND** environment variable `WECHAT_WORK_WEBHOOK` is set
-- **THEN** the system SHALL load and use this formatter
+#### Scenario: Missing webhook credential
+- **WHEN** a formatter module exists but its webhook environment variable is absent
+- **THEN** that formatter SHALL NOT be included as a new-event target
 
-#### Scenario: Formatter file exists but no env var
-- **WHEN** `src/formatters/wechat_work.py` exists
-- **AND** environment variable `WECHAT_WORK_WEBHOOK` is NOT set
-- **THEN** the system SHALL skip this formatter
+### Requirement: Block new content without targets
+When new content exists and no formatter is enabled, the system SHALL fail before creating an outbox event or advancing the baseline.
 
-#### Scenario: Explicitly disabled
-- **WHEN** environment variable `WECHAT_WORK_ENABLED` is set to `false`
-- **THEN** the system SHALL skip this formatter regardless of webhook URL presence
+#### Scenario: No formatter enabled
+- **WHEN** a non-initial run detects a new URL and no target is configured
+- **THEN** the baseline SHALL remain unchanged
+- **AND** the workflow SHALL fail
 
-### Requirement: Send aggregated notification
-The system SHALL aggregate all new URLs discovered in a single run into one notification message per enabled platform.
+### Requirement: Complete planned delivery
+Each formatter SHALL plan one or more immutable payload chunks that collectively cover every assigned item exactly once. Failures SHALL be surfaced after independent targets have been attempted.
 
-#### Scenario: Multiple categories have updates
-- **WHEN** news has 2 new URLs and research has 1 new URL
-- **THEN** the system SHALL send one message per platform containing all 3 updates grouped by category
+#### Scenario: Sixteen WeChat Work items
+- **WHEN** an event contains 16 WeChat Work items
+- **THEN** the plan SHALL contain two payloads with at most 8 articles each
+- **AND** every item SHALL occur in exactly one payload
 
-#### Scenario: Notification failure does not block others
-- **WHEN** sending to platform A fails
-- **THEN** the system SHALL log the error and continue sending to platform B
+### Requirement: Platform response validation
+Formatters SHALL retry bounded delivery attempts and treat non-2xx responses, redirects, invalid JSON, and non-zero platform business error codes as failures. Credential-bearing URLs and untrusted remote error text SHALL NOT appear in surfaced errors. Only bounded integer business error codes MAY appear; all other returned error-code values SHALL be represented as `unknown`.
 
-### Requirement: WeChat Work message format
-The wechat_work formatter SHALL produce a markdown message compatible with WeChat Work webhook API (`msgtype: "markdown"`).
+#### Scenario: HTTP 200 business error
+- **WHEN** WeChat Work returns HTTP 200 with non-zero `errcode`
+- **THEN** the chunk SHALL remain pending
+- **AND** the workflow SHALL fail
 
-#### Scenario: Format message with new URLs
-- **WHEN** given category `news` with URLs `[url_1, url_2]`
-- **THEN** the payload SHALL be a JSON dict with `msgtype: "markdown"` and a `markdown.content` field listing the URLs with category header
+#### Scenario: Webhook redirect
+- **WHEN** a webhook responds with a redirect to another URL
+- **THEN** the redirect SHALL NOT be followed
+- **AND** the chunk SHALL remain pending
 
-#### Scenario: Message size limit
-- **WHEN** the formatted message exceeds 4096 bytes
-- **THEN** the system SHALL truncate the URL list and append a summary count
+#### Scenario: Untrusted error-code value
+- **WHEN** a webhook returns a URL, string, boolean, or oversized integer as `errcode`
+- **THEN** surfaced errors SHALL show `errcode=unknown`
+- **AND** SHALL NOT expose the returned value

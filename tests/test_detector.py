@@ -1,97 +1,70 @@
-"""Tests for src/detector.py — written BEFORE implementation."""
+"""Tests for durable category detection."""
 
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 class TestDetectChanges:
-    """Tests for detect_changes()."""
-
     def test_new_urls_detected(self):
         from src.detector import detect_changes
 
-        current = {"https://www.anthropic.com/news/a", "https://www.anthropic.com/news/b", "https://www.anthropic.com/news/c"}
-        known = {"https://www.anthropic.com/news/a", "https://www.anthropic.com/news/b"}
-
-        new_urls = detect_changes(current, known)
-
-        assert new_urls == {"https://www.anthropic.com/news/c"}
+        current = {"https://www.anthropic.com/news/a", "https://www.anthropic.com/news/b"}
+        known = {"https://www.anthropic.com/news/a"}
+        assert detect_changes(current, known) == {"https://www.anthropic.com/news/b"}
 
     def test_no_changes(self):
         from src.detector import detect_changes
 
-        urls = {"https://www.anthropic.com/news/a", "https://www.anthropic.com/news/b"}
+        urls = {"https://www.anthropic.com/news/a"}
+        assert detect_changes(urls, urls) == set()
 
-        new_urls = detect_changes(urls, urls)
-
-        assert new_urls == set()
-
-    def test_empty_known_returns_empty(self):
-        """First run with no baseline: should return empty (silent baseline creation)."""
+    def test_first_run_is_silent(self):
         from src.detector import detect_changes
 
         current = {"https://www.anthropic.com/news/a"}
+        assert detect_changes(current, set(), is_first_run=True) == set()
 
-        new_urls = detect_changes(current, known=set(), is_first_run=True)
-
-        assert new_urls == set()
-
-    def test_non_first_run_with_empty_known_returns_all(self):
-        """If known is empty but it's not first run, treat as new."""
+    def test_non_first_empty_baseline_detects_everything(self):
         from src.detector import detect_changes
 
-        current = {"https://www.anthropic.com/news/a", "https://www.anthropic.com/news/b"}
-
-        new_urls = detect_changes(current, known=set(), is_first_run=False)
-
-        assert new_urls == current
+        current = {"https://www.anthropic.com/news/a"}
+        assert detect_changes(current, set()) == current
 
 
 class TestProcessCategory:
-    """Tests for process_category() — orchestrates detection + issue management."""
-
     @patch("src.detector.issues")
-    def test_first_run_creates_baseline_no_notification(self, mock_issues):
+    def test_first_run_creates_baseline_without_event(self, mock_issues):
         from src.detector import process_category
 
+        current = {"https://www.anthropic.com/news/a"}
         mock_issues.get_baseline_issue.return_value = (None, set())
+        assert process_category("news", current, [], []) == []
+        mock_issues.create_baseline_issue.assert_called_once_with("news", current)
 
-        current_urls = {"https://www.anthropic.com/news/a", "https://www.anthropic.com/news/b"}
-
-        new_urls = process_category("news", current_urls)
-
-        assert new_urls == set()
-        mock_issues.create_baseline_issue.assert_called_once_with("news", current_urls)
-        mock_issues.create_update_issue.assert_not_called()
-
+    @patch("src.detector.notifier.plan_events")
     @patch("src.detector.issues")
-    def test_new_urls_create_aggregated_issue_and_close_old(self, mock_issues):
+    def test_new_urls_create_outbox_before_union_baseline(self, mock_issues, mock_plan):
         from src.detector import process_category
 
         known = {"https://www.anthropic.com/news/a"}
+        current = known | {"https://www.anthropic.com/news/b"}
+        planned = object()
+        persisted = object()
         mock_issues.get_baseline_issue.return_value = (1, known)
-        mock_issues.create_update_issue.return_value = 7
+        mock_plan.return_value = [planned]
+        mock_issues.create_outbox_issue.return_value = persisted
 
-        current_urls = {"https://www.anthropic.com/news/a", "https://www.anthropic.com/news/b"}
-
-        new_urls = process_category("news", current_urls)
-
-        assert new_urls == {"https://www.anthropic.com/news/b"}
-        # Called once with the full set of new URLs (not once per URL)
-        mock_issues.create_update_issue.assert_called_once_with("news", {"https://www.anthropic.com/news/b"})
-        mock_issues.close_old_update_issues.assert_called_once_with("news", exclude_number=7)
-        mock_issues.update_baseline_issue.assert_called_once_with(1, current_urls)
+        assert process_category("news", current, [], [{"name": "target"}]) == [persisted]
+        mock_plan.assert_called_once_with(
+            "news", {"https://www.anthropic.com/news/b"}, [{"name": "target"}]
+        )
+        mock_issues.update_baseline_issue.assert_called_once_with(1, current)
 
     @patch("src.detector.issues")
-    def test_no_changes_does_nothing(self, mock_issues):
+    def test_no_changes_does_not_write_state(self, mock_issues):
         from src.detector import process_category
 
         urls = {"https://www.anthropic.com/news/a"}
         mock_issues.get_baseline_issue.return_value = (1, urls)
-
-        new_urls = process_category("news", urls)
-
-        assert new_urls == set()
-        mock_issues.create_update_issue.assert_not_called()
-        mock_issues.close_old_update_issues.assert_not_called()
+        assert process_category("news", urls, [], []) == []
+        mock_issues.create_outbox_issue.assert_not_called()
         mock_issues.update_baseline_issue.assert_not_called()

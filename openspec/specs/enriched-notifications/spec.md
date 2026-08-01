@@ -1,39 +1,23 @@
-## ADDED Requirements
+## Requirements
 
-### Requirement: Page metadata enrichment
-The system SHALL fetch each new URL's page and extract og:title, og:description, and og:image metadata. If fetching fails, the system SHALL fall back to slug-based title with no description/image.
+### Requirement: Trusted page metadata enrichment
+The system SHALL fetch each new trusted URL and snapshot title, description, and image metadata. Redirect targets SHALL be validated before following. Fetch failure SHALL fall back to a slug title with no description or image.
 
-#### Scenario: Page has og metadata
-- **WHEN** the system fetches `https://www.anthropic.com/news/claude-opus-4-7`
-- **AND** the page contains `<meta property="og:title" content="Introducing Claude Opus 4.7"/>`
-- **THEN** the enriched data SHALL include `title: "Introducing Claude Opus 4.7"`
+#### Scenario: Metadata fetch fails
+- **WHEN** a page times out or attempts a cross-origin redirect
+- **THEN** enrichment SHALL return the original URL and slug title
+- **AND** SHALL NOT prevent durable planning
 
-#### Scenario: Page fetch fails
-- **WHEN** the system cannot fetch a URL (timeout, 404, etc.)
-- **THEN** the enriched data SHALL fall back to `title: "claude-opus-4-7"` (slug from URL)
-- **AND** description and image SHALL be None
+### Requirement: Persisted payload snapshot
+Enriched payloads SHALL be persisted in immutable outbox chunks before delivery. A retry SHALL use the persisted payload instead of fetching or formatting the page again.
 
-## MODIFIED Requirements
-
-### Requirement: Formatter interface change
-All formatters SHALL accept `changes: dict[str, list[dict]]` where each dict contains `url`, `title`, `description`, and `image` fields.
-
-#### Scenario: Formatter receives enriched data
-- **WHEN** format_message is called
-- **THEN** changes SHALL be `{"news": [{"url": "...", "title": "...", "description": "...", "image": "..."}]}`
+#### Scenario: Page metadata changes during retry
+- **WHEN** an event is pending and the source page later changes
+- **THEN** the retry SHALL send the payload captured by the event
 
 ### Requirement: WeChat Work news format
-The wechat_work formatter SHALL produce `msgtype: "news"` with articles containing title, description, url, and picurl fields.
+WeChat Work SHALL use `msgtype: news` with at most 8 articles per payload. Batches larger than 8 SHALL create additional payload chunks rather than truncate items.
 
-#### Scenario: Single new article
-- **WHEN** 1 new URL is found with title "Introducing Claude Opus 4.7"
-- **THEN** the payload SHALL be `{"msgtype": "news", "news": {"articles": [{...}]}}`
-- **AND** the article SHALL have title, description, url, and picurl
-
-#### Scenario: Multiple new articles (max 8)
-- **WHEN** 10 new URLs are found
-- **THEN** the payload SHALL include the first 8 articles (news type limit)
-
-#### Scenario: No image available
-- **WHEN** an article has no og:image
-- **THEN** the article's picurl SHALL be omitted or empty
+#### Scenario: Sixteen enriched articles
+- **WHEN** 16 items target WeChat Work
+- **THEN** two 8-article chunks SHALL be persisted

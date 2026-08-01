@@ -1,62 +1,63 @@
-"""DingTalk webhook formatter — markdown message with HMAC-SHA256 signing."""
+"""DingTalk markdown formatter with optional HMAC-SHA256 signing."""
 
 import base64
 import hashlib
 import hmac
 import os
 import time
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import quote_plus
 
-import requests
+from src.webhook_http import post_json
+
+
+FORMATTER_VERSION = 1
+MAX_ITEMS_PER_MESSAGE = 20
 
 
 def _compute_sign(timestamp: int, secret: str) -> str:
-    """Compute HMAC-SHA256 signature for DingTalk webhook."""
+    """Compute DingTalk's HMAC-SHA256 signature."""
     string_to_sign = f"{timestamp}\n{secret}"
-    hmac_code = hmac.new(
+    digest = hmac.new(
         secret.encode("utf-8"),
         string_to_sign.encode("utf-8"),
         digestmod=hashlib.sha256,
     ).digest()
-    return quote_plus(base64.b64encode(hmac_code).decode("utf-8"))
+    return quote_plus(base64.b64encode(digest).decode("utf-8"))
 
 
 def format_message(changes: dict[str, list[dict]]) -> dict | None:
-    """Format enriched changes into a DingTalk markdown message payload."""
+    """Format one bounded chunk as DingTalk markdown."""
     if not changes:
         return None
-
     lines = ["## Anthropic Website Update\n"]
-
+    item_count = 0
     for category, items in sorted(changes.items()):
         if not items:
             continue
         lines.append(f"**{category.capitalize()}**:\n")
         for item in items:
-            title = item["title"]
-            url = item["url"]
-            lines.append(f"- [{title}]({url})")
+            lines.append(f"- [{item['title']}]({item['url']})")
+            item_count += 1
         lines.append("")
-
-    text = "\n".join(lines)
-
+    if item_count == 0:
+        return None
     return {
         "msgtype": "markdown",
         "markdown": {
             "title": "Anthropic Website Update",
-            "text": text,
+            "text": "\n".join(lines),
         },
     }
 
 
 def send(payload: dict, webhook_url: str) -> None:
-    """Send payload to DingTalk webhook, with optional HMAC signing."""
+    """Sign if configured, then require DingTalk business success."""
     secret = os.environ.get("DINGTALK_SECRET")
-
     if secret:
         timestamp = int(time.time() * 1000)
-        sign = _compute_sign(timestamp, secret)
-        webhook_url = f"{webhook_url}&timestamp={timestamp}&sign={sign}"
-
-    response = requests.post(webhook_url, json=payload, timeout=10)
-    response.raise_for_status()
+        separator = "&" if "?" in webhook_url else "?"
+        webhook_url = (
+            f"{webhook_url}{separator}timestamp={timestamp}"
+            f"&sign={_compute_sign(timestamp, secret)}"
+        )
+    post_json(webhook_url, payload)

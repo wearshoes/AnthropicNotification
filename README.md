@@ -2,214 +2,120 @@
 
 [English](README_EN.md) | 中文
 
-监控 [Anthropic](https://www.anthropic.com) 网站内容更新，通过 Webhook 第一时间推送通知。
+监控 [Anthropic](https://www.anthropic.com) 发布的新内容，并通过企业微信或钉钉 Webhook 推送通知。
 
 ## 功能特性
 
-- 基于 **Sitemap.xml** 检测内容更新，稳定可靠，不依赖页面 HTML 结构
-- 使用 **GitHub Issues** 作为状态存储，无需数据库或外部服务
-- 支持多平台 **Webhook 通知**（企业微信、钉钉、飞书、Slack、自定义）
-- **页面元数据抓取**：自动获取文章标题、描述、封面图，通知更直观
-- **GitHub Actions** 自动运行，每 30 分钟检查一次
-- 约定式 **Formatter 发现机制**，新增通知平台只需添加一个文件
-- **Issue 生命周期管理**：同分类只保留最新一个 update issue，旧的自动关闭
-- 首次运行自动创建基线，不会产生通知轰炸
+- 基于 Sitemap 监控 news、research、engineering、learn 四类内容
+- 使用 GitHub Issues 保存持久化基线和通知 outbox
+- 至少一次投递：按消息块记录回执，失败后自动重试
+- 完整分块：企业微信每条最多 8 篇，多出的内容继续发送，不再截断丢失
+- 批次超出 GitHub Issue 正文限制时，自动拆分为多个 outbox 事件
+- 自动抓取页面标题、描述和封面图
+- GitHub 状态与 Webhook 操作均采用故障关闭策略
+- GitHub Actions 单写者串行执行，并设置运行超时
+- 首次运行静默创建基线，不发送历史内容
 
-## 工作原理
+## 可靠性模型
 
-```
-                    ┌──────────────┐
-                    │ Sitemap.xml  │
-                    └──────┬───────┘
-                           │
-                    ┌──────▼───────┐
-                    │ 按分类过滤    │  news / research / engineering / learn
-                    └──────┬───────┘
-                           │
-                    ┌──────▼───────┐     ┌──────────────┐
-                    │ 对比基线      │◄────│ GitHub Issues│
-                    │ (新 URL?)    │     │ (状态存储)    │
-                    └──────┬───────┘     └──────────────┘
-                           │
-                    ┌──────▼───────┐
-                    │ 发现新内容    │
-                    └──────┬───────┘
-                           │
-              ┌────────────┼────────────┐
-              ▼            ▼            ▼
-       创建聚合 Issue  更新基线    抓取元数据 + 发送通知
-       (关闭旧的)     (追加URL)   (title/desc/image)
-```
+发现新 URL 后按以下顺序处理：
 
-1. 通过 GitHub Actions 定时获取 `https://www.anthropic.com/sitemap.xml`
-2. 将 URL 按路径前缀分为 4 个分类
-3. 与 GitHub Issues 中存储的基线 URL 列表对比
-4. 发现新 URL 后：
-   - 创建一个聚合 Issue 记录所有新 URL，关闭该分类下的旧 update Issue
-   - 抓取每个新页面的 title/description/image 元数据
-   - 通过 Webhook 发送带封面图和标题的图文通知
-5. 首次运行时静默创建基线（不发通知）
+1. 校验并规范化 sitemap 快照。
+2. 抓取新页面元数据，把固定的目标、目的地指纹、formatter 版本、分块成员和 payload 持久化到一个或多个大小受限的 outbox Issue。
+3. 重新读取 Issue，确认持久化成功。
+4. 用 `已知 URL ∪ 当前 URL` 扩展基线。
+5. 逐个发送 pending 消息块，每次成功后立即保存回执。
+6. 所有目标消息块都有回执后，将 Issue 标记为 delivered。
+
+Webhook 平台不提供可用的幂等键。如果进程在平台已接收消息、但回执尚未保存时停止，该消息块可能在下次运行时重复发送。因此系统保证的是持久化的**至少一次投递**，不是恰好一次。GitHub API 故障、目标凭证缺失、formatter 版本不匹配、HTTP 错误或平台返回非零 `errcode` 时，任务保持 pending 并让工作流失败。
+
+workflow 每 30 分钟请求调度一次，但 GitHub Actions 的定时任务是尽力执行，可能被 GitHub 延迟或跳过。需要立即检查时可使用 `workflow_dispatch` 手动触发。
 
 ## 监控页面
 
 | 分类 | URL 路径 | 内容类型 |
 |------|----------|----------|
-| news | `/news/*` | 产品发布、公司公告、政策声明 |
-| research | `/research/*` | AI 安全研究论文、技术报告 |
-| engineering | `/engineering/*` | 工程博客、技术实践 |
+| news | `/news/*` | 产品发布、公司公告 |
+| research | `/research/*` | AI 安全论文、技术报告 |
+| engineering | `/engineering/*` | 工程博客 |
 | learn | `/learn/*` | Anthropic Academy 课程 |
+
+系统只接受精确位于 `https://www.anthropic.com` 的规范 URL。四个分类必须都非空且内容总数不少于 300，否则拒绝该快照；已有基线不会缩小。
 
 ## 快速开始
 
-### 第一步：Fork 仓库
+1. Fork 本仓库。
+2. 在 **Settings → Secrets and variables → Actions** 中至少配置一个已实现平台：
 
-点击本仓库右上角的 **Fork** 按钮，将仓库复制到你的 GitHub 账号下。
+| Secret | 说明 | 是否必须 |
+|--------|------|----------|
+| `WECHAT_WORK_WEBHOOK` | 企业微信机器人 Webhook URL | 至少一个目标 |
+| `DINGTALK_WEBHOOK` | 钉钉自定义机器人 Webhook URL | 至少一个目标 |
+| `DINGTALK_SECRET` | 钉钉签名密钥 | 可选 |
 
-### 第二步：配置 Webhook Secret
+3. 在 fork 中启用 GitHub Actions。
+4. 手动运行一次 **Monitor Anthropic Website**。
 
-1. 进入你 fork 后的仓库
-2. 点击 **Settings** → **Secrets and variables** → **Actions**
-3. 点击 **New repository secret**
-4. 添加你需要的通知平台 Webhook：
+首次成功运行会为四个分类各创建一个 baseline Issue，并且不会发送通知。后续发现新内容时会创建机器可读的 update Issue。若出现新内容时没有启用任何 formatter，任务会失败且基线不会推进。
 
-| Secret 名称 | 说明 | 是否必须 |
-|-------------|------|---------|
-| `WECHAT_WORK_WEBHOOK` | 企业微信机器人 Webhook URL | 至少配一个 |
-| `DINGTALK_WEBHOOK` | 钉钉自定义机器人 Webhook URL | 可选 |
-| `DINGTALK_SECRET` | 钉钉机器人签名密钥 | 可选 |
-| `FEISHU_WEBHOOK` | 飞书自定义机器人 Webhook URL | 可选 |
-| `FEISHU_SECRET` | 飞书机器人签名密钥 | 可选 |
-| `SLACK_WEBHOOK` | Slack Incoming Webhook URL | 可选 |
-| `CUSTOM_WEBHOOK` | 任意自定义 Webhook 端点 | 可选 |
-
-> 配置了哪个平台的 Webhook Secret，就会自动启用该平台的通知。不需要额外开关。
-
-### 第三步：启用 GitHub Actions
-
-1. 进入仓库的 **Actions** 标签页
-2. 如果看到 "Workflows aren't being run on this forked repository"，点击 **I understand my workflows, go ahead and enable them**
-3. 找到 **Monitor Anthropic Website** workflow
-4. 点击 **Run workflow** → **Run workflow** 手动触发一次
-
-### 第四步：验证
-
-首次运行会：
-- 在 Issues 中创建 4 个基线 Issue（[Baseline] news / research / engineering / learn）
-- **不会发送通知**（这是预期行为，静默建立基线）
-
-之后每 30 分钟自动检查一次。当 Anthropic 网站发布新内容时，你会：
-- 收到带封面图和文章标题的图文通知
-- 在 Issues 中看到一个聚合的 update Issue（同分类旧的自动关闭）
-
-## 已支持的通知平台
+## 已支持平台
 
 | 平台 | Formatter | 消息格式 | 签名 |
-|------|-----------|---------|------|
-| 企业微信 | `wechat_work.py` | 图文卡片 (news) | 无 |
-| 钉钉 | `dingtalk.py` | Markdown 链接列表 | HMAC-SHA256 (可选) |
+|------|-----------|----------|------|
+| 企业微信 | `wechat_work.py` | 图文卡片，每块最多 8 篇 | 无 |
+| 钉钉 | `dingtalk.py` | Markdown 链接，每块最多 20 项 | 可选 HMAC-SHA256 |
 
-## 添加新的通知平台
+本仓库目前没有实现飞书、Slack 和自定义 Webhook。
 
-在 `src/formatters/` 目录下创建一个 Python 文件即可：
+## 添加平台
 
-```
-src/formatters/my_platform.py
-```
-
-文件需要导出两个函数：
+创建 `src/formatters/my_platform.py`：
 
 ```python
+FORMATTER_VERSION = 1
+MAX_ITEMS_PER_MESSAGE = 10
+
 def format_message(changes: dict[str, list[dict]]) -> dict | None:
-    """将变更格式化为平台特定的消息体。
-    
-    changes 格式: {"news": [{"url": "...", "title": "...", "description": "...", "image": "..."}]}
-    """
     ...
 
 def send(payload: dict, webhook_url: str) -> None:
-    """发送消息到 Webhook。"""
     ...
 ```
 
-然后在 GitHub Secrets 中添加 `MY_PLATFORM_WEBHOOK`。
+`send()` 只有在 HTTP 与平台业务状态都成功时才能返回，否则必须抛出异常。随后需要同时在 GitHub Secrets 和 `.github/workflows/monitor.yml` 的 `Run monitor` 环境变量中加入 `MY_PLATFORM_WEBHOOK`。已存在的 pending 事件会继续使用创建时保存的目标、目的地指纹、契约版本、分块与 payload；若目标 URL 改变，旧 pending 投递会被阻止，而不会被静默转发到新地址。
 
-系统会自动发现：文件名 `my_platform.py` → 对应环境变量 `MY_PLATFORM_WEBHOOK`。
-
-参考 `src/formatters/_template.py` 了解完整的接口契约，参考 `src/formatters/_styles/` 目录下的消息风格 catalog 选择消息样式。
+完整契约见 `src/formatters/_template.py`。
 
 ## 项目架构
 
-```
+```text
 src/
-├── main.py              # 编排器：sitemap → detector → issues → notifier
-├── sitemap.py           # 获取并解析 sitemap.xml，按分类过滤
-├── detector.py          # 对比 sitemap URL 与基线，识别新内容
-├── issues.py            # 通过 gh CLI 管理 GitHub Issues（基线 + 更新 + 自动关闭）
-├── enrichment.py        # 抓取页面元数据（og:title, og:description, og:image）
-├── notifier.py          # 约定式 formatter 发现 + 元数据丰富 + 分发通知
+├── main.py              # 恢复 pending、接收快照、完成事件
+├── sitemap.py           # 可信抓取、URL 规范化、分类
+├── detector.py          # 快照保护、差异检测、持久化顺序
+├── outbox.py            # 稳定 ID、不可变分块、回执
+├── issues.py            # 写后验证的 GitHub Issue 状态操作
+├── enrichment.py        # 带重定向校验的页面元数据抓取
+├── notifier.py          # Formatter 发现、规划与分块投递
+├── webhook_http.py      # 重试与平台业务响应校验
 └── formatters/
-    ├── _template.py     # Formatter 代码模板
-    ├── _styles/         # 各平台消息风格 catalog
-    │   ├── wechat_work.md
-    │   ├── dingtalk.md
-    │   ├── feishu.md
-    │   └── slack.md
-    ├── wechat_work.py   # 企业微信图文卡片格式化器
-    └── dingtalk.py      # 钉钉 Markdown 格式化器（HMAC-SHA256 签名）
-
-tests/                   # 单元测试（pytest, 68 个测试）
-.github/workflows/
-    └── monitor.yml      # GitHub Actions 工作流（每 30 分钟）
-.githooks/
-    └── commit-msg       # Git commit 消息格式校验
+    ├── _template.py
+    ├── wechat_work.py
+    └── dingtalk.py
 ```
-
-## CodeBuddy Skills
-
-本项目集成了 [CodeBuddy Code](https://cnb.cool/codebuddy/codebuddy-code) 的 Skills 系统，提供自动化的开发流程：
-
-| 命令 | 说明 |
-|------|------|
-| `/formatter:add <platform>` | 添加新通知平台，引导完整的 OpenSpec + TDD 流程，含消息风格选择 |
-| `/category:add <name> <path>` | 添加新监控分类，引导更新代码 + 测试 + 文档 |
-| `/opsx:explore` | 进入探索模式，用复利思维分析问题和方案 |
-| `/opsx:propose` | 创建 OpenSpec 变更提案（proposal → specs → design → tasks） |
-| `/opsx:apply` | 按 TDD 流程实现变更任务 |
-| `/opsx:archive` | 归档变更，同步 specs，提交并推送 |
-
-### 流程保障 Hooks
-
-| Hook | 类型 | 作用 |
-|------|------|------|
-| `tdd-guard.sh` | PreToolUse | 写 src/ 前必须先有对应测试文件 |
-| `tdd-autotest.sh` | PostToolUse | 写 src/ 后自动运行 pytest |
-| `openspec-guard.sh` | PreToolUse | 修改 src/ 前提醒创建 OpenSpec 变更 |
-| `ci-status.sh` | PostToolUse | git push 后自动查询 GitHub Actions 状态 |
-| `commit-msg` | Git Hook | 校验 commit 消息格式 `<type>: <description>` |
 
 ## 本地开发
 
+完整的非 dry-run 执行需要 Python 3.11+ 和 GitHub CLI (`gh`)。
+
 ```bash
-# 安装依赖
 pip install -r requirements.txt
-
-# 配置 git hooks（commit 消息格式校验）
 git config core.hooksPath .githooks
-
-# 运行测试
-python -m pytest tests/ -v
-
-# 仅抓取 sitemap（不检测变更、不发通知）
+python -m pytest tests -v
 python -m src.main --dry-run
 ```
 
-### Commit 规范
-
-```
-<type>: <description>
-
-type: feat | fix | docs | refactor | test | chore
-```
+Commit 使用 `<type>: <description>` 格式，type 可选 `feat`、`fix`、`docs`、`refactor`、`test`、`chore`。
 
 ## License
 

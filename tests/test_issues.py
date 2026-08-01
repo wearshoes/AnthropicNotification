@@ -1,304 +1,124 @@
-"""Tests for src/issues.py — written BEFORE implementation."""
+"""Core tests for fail-closed GitHub Issue state."""
 
 import json
+import logging
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, call
+
+
+def _baseline(number, body, category="news", state="OPEN"):
+    return {
+        "number": number,
+        "body": body,
+        "labels": [{"name": "baseline"}, {"name": category}],
+        "state": state,
+    }
 
 
 class TestGetBaselineIssue:
-    """Tests for get_baseline_issue()."""
-
     @patch("src.issues.subprocess.run")
     def test_returns_urls_when_baseline_exists(self, mock_run):
         from src.issues import get_baseline_issue
 
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout=json.dumps([{
-                "number": 1,
-                "body": "https://www.anthropic.com/news/a\nhttps://www.anthropic.com/news/b\n",
-            }]),
+        mock_run.return_value = MagicMock(returncode=0, stdout=json.dumps([
+            _baseline(
+                1,
+                "https://www.anthropic.com/news/a\n\n"
+                "https://www.anthropic.com/news/b",
+            )
+        ]), stderr="")
+        assert get_baseline_issue("news") == (
+            1,
+            {"https://www.anthropic.com/news/a", "https://www.anthropic.com/news/b"},
         )
 
-        number, urls = get_baseline_issue("news")
-
-        assert number == 1
-        assert urls == {"https://www.anthropic.com/news/a", "https://www.anthropic.com/news/b"}
-
     @patch("src.issues.subprocess.run")
-    def test_returns_empty_when_no_baseline(self, mock_run):
+    def test_returns_missing_only_for_empty_successful_query(self, mock_run):
         from src.issues import get_baseline_issue
 
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout=json.dumps([]),
-        )
-
-        number, urls = get_baseline_issue("news")
-
-        assert number is None
-        assert urls == set()
+        mock_run.return_value = MagicMock(returncode=0, stdout="[]", stderr="")
+        assert get_baseline_issue("news") == (None, set())
 
     @patch("src.issues.subprocess.run")
-    def test_ignores_blank_lines_in_body(self, mock_run):
-        from src.issues import get_baseline_issue
+    def test_rejects_wrong_category_or_closed_baseline_result(self, mock_run):
+        from src.issues import GitHubStateError, get_baseline_issue
 
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout=json.dumps([{
-                "number": 5,
-                "body": "https://www.anthropic.com/news/a\n\n\nhttps://www.anthropic.com/news/b\n",
-            }]),
-        )
+        mock_run.return_value = MagicMock(returncode=0, stdout=json.dumps([
+            _baseline(1, "https://www.anthropic.com/news/a", "research", "CLOSED")
+        ]), stderr="")
 
-        number, urls = get_baseline_issue("news")
-
-        assert number == 5
-        assert len(urls) == 2
-
-
-class TestCreateBaselineIssue:
-    """Tests for create_baseline_issue()."""
-
-    @patch("src.issues.subprocess.run")
-    def test_creates_issue_with_correct_labels(self, mock_run):
-        from src.issues import create_baseline_issue, _ensured_labels
-        _ensured_labels.clear()
-
-        mock_run.return_value = MagicMock(returncode=0, stdout="")
-
-        urls = {"https://www.anthropic.com/news/a", "https://www.anthropic.com/news/b"}
-        create_baseline_issue("news", urls)
-
-        # Find the issue create call (skip label create calls)
-        create_calls = [c for c in mock_run.call_args_list if "issue" in c[0][0] and "create" in c[0][0]]
-        assert len(create_calls) == 1
-        cmd = create_calls[0][0][0]
-        label_idx = cmd.index("--label")
-        assert "baseline,news" in cmd[label_idx + 1]
-
-
-class TestUpdateBaselineIssue:
-    """Tests for update_baseline_issue()."""
-
-    @patch("src.issues.subprocess.run")
-    def test_edits_issue_body(self, mock_run):
-        from src.issues import update_baseline_issue
-
-        mock_run.return_value = MagicMock(returncode=0, stdout="")
-
-        urls = {"https://www.anthropic.com/news/a", "https://www.anthropic.com/news/b"}
-        update_baseline_issue(1, urls)
-
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
-        assert "gh" in cmd
-        assert "issue" in cmd
-        assert "edit" in cmd
-        assert "1" in [str(c) for c in cmd]
-
-
-class TestCreateUpdateIssue:
-    """Tests for create_update_issue() — aggregated mode."""
-
-    @patch("src.issues.subprocess.run")
-    def test_single_url_title_uses_slug(self, mock_run):
-        from src.issues import create_update_issue, _ensured_labels
-        _ensured_labels.clear()
-
-        mock_run.return_value = MagicMock(returncode=0, stdout="")
-
-        create_update_issue("news", {"https://www.anthropic.com/news/project-glasswing"})
-
-        create_calls = [c for c in mock_run.call_args_list if "issue" in c[0][0] and "create" in c[0][0]]
-        assert len(create_calls) == 1
-        cmd = create_calls[0][0][0]
-        title_idx = cmd.index("--title")
-        title = cmd[title_idx + 1]
-        assert "project-glasswing" in title.lower()
-
-    @patch("src.issues.subprocess.run")
-    def test_multiple_urls_title_shows_count(self, mock_run):
-        from src.issues import create_update_issue, _ensured_labels
-        _ensured_labels.clear()
-
-        mock_run.return_value = MagicMock(returncode=0, stdout="")
-
-        urls = {
-            "https://www.anthropic.com/news/a",
-            "https://www.anthropic.com/news/b",
-            "https://www.anthropic.com/news/c",
-        }
-        create_update_issue("news", urls)
-
-        create_calls = [c for c in mock_run.call_args_list if "issue" in c[0][0] and "create" in c[0][0]]
-        assert len(create_calls) == 1
-        cmd = create_calls[0][0][0]
-        title_idx = cmd.index("--title")
-        title = cmd[title_idx + 1]
-        assert "3" in title
-
-    @patch("src.issues.subprocess.run")
-    def test_body_contains_all_urls(self, mock_run):
-        from src.issues import create_update_issue, _ensured_labels
-        _ensured_labels.clear()
-
-        mock_run.return_value = MagicMock(returncode=0, stdout="")
-
-        urls = {
-            "https://www.anthropic.com/news/a",
-            "https://www.anthropic.com/news/b",
-        }
-        create_update_issue("news", urls)
-
-        create_calls = [c for c in mock_run.call_args_list if "issue" in c[0][0] and "create" in c[0][0]]
-        cmd = create_calls[0][0][0]
-        body_idx = cmd.index("--body")
-        body = cmd[body_idx + 1]
-        assert "https://www.anthropic.com/news/a" in body
-        assert "https://www.anthropic.com/news/b" in body
-
-    @patch("src.issues.subprocess.run")
-    def test_labels_are_correct(self, mock_run):
-        from src.issues import create_update_issue, _ensured_labels
-        _ensured_labels.clear()
-
-        mock_run.return_value = MagicMock(returncode=0, stdout="")
-
-        create_update_issue("news", {"https://www.anthropic.com/news/a"})
-
-        create_calls = [c for c in mock_run.call_args_list if "issue" in c[0][0] and "create" in c[0][0]]
-        cmd = create_calls[0][0][0]
-        label_idx = cmd.index("--label")
-        assert "news,update" in cmd[label_idx + 1]
+        with pytest.raises(GitHubStateError, match="Baseline query"):
+            get_baseline_issue("news")
 
 
 class TestCloseOldUpdateIssues:
-    """Tests for close_old_update_issues()."""
-
     @patch("src.issues.subprocess.run")
-    def test_closes_old_update_issues(self, mock_run):
+    def test_closes_old_excludes_current_and_verifies_close(self, mock_run):
         from src.issues import close_old_update_issues
 
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout=json.dumps([
-                {"number": 5},
-                {"number": 6},
-            ])),
-            MagicMock(returncode=0, stdout=""),  # close #5
-            MagicMock(returncode=0, stdout=""),  # close #6
+                {"number": 5, "labels": []},
+                {"number": 7, "labels": []},
+            ]), stderr=""),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout=json.dumps({
+                "number": 5, "body": "", "labels": [], "state": "CLOSED"
+            }), stderr=""),
+        ]
+        close_old_update_issues("news", exclude_number=7)
+        assert [entry.args[0] for entry in mock_run.call_args_list if "close" in entry.args[0]] == [
+            ["gh", "issue", "close", "5"]
         ]
 
-        close_old_update_issues("news", exclude_number=7)
-
-        close_calls = [c for c in mock_run.call_args_list if "close" in c[0][0]]
-        assert len(close_calls) == 2
-        closed_numbers = {c[0][0][c[0][0].index("close") + 1] for c in close_calls}
-        assert closed_numbers == {"5", "6"}
-
     @patch("src.issues.subprocess.run")
-    def test_excludes_specified_issue_number(self, mock_run):
+    def test_requires_excluded_current_issue(self, mock_run):
         from src.issues import close_old_update_issues
 
-        mock_run.side_effect = [
-            MagicMock(returncode=0, stdout=json.dumps([
-                {"number": 5},
-                {"number": 7},
-            ])),
-            MagicMock(returncode=0, stdout=""),  # close #5
-        ]
-
-        close_old_update_issues("news", exclude_number=7)
-
-        close_calls = [c for c in mock_run.call_args_list if "close" in c[0][0]]
-        assert len(close_calls) == 1
-        cmd = close_calls[0][0][0]
-        assert "5" in cmd
-
-    @patch("src.issues.subprocess.run")
-    def test_no_old_issues_does_nothing(self, mock_run):
-        from src.issues import close_old_update_issues
-
-        mock_run.return_value = MagicMock(returncode=0, stdout=json.dumps([]))
-
-        close_old_update_issues("news", exclude_number=7)
-
-        assert mock_run.call_count == 1
+        with pytest.raises(ValueError, match="exclude_number"):
+            close_old_update_issues("news")
+        mock_run.assert_not_called()
 
 
 class TestEnsureLabel:
-    """Tests for _ensure_label() — idempotent label creation with caching."""
-
     @patch("src.issues.subprocess.run")
-    def test_creates_label_with_force_flag(self, mock_run):
+    def test_successful_label_creation_is_cached(self, mock_run):
         from src.issues import _ensure_label, _ensured_labels
+
         _ensured_labels.clear()
-
-        mock_run.return_value = MagicMock(returncode=0, stdout="")
-
-        _ensure_label("baseline")
-
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
-        assert "label" in cmd
-        assert "create" in cmd
-        assert "baseline" in cmd
-        assert "--force" in cmd
-
-    @patch("src.issues.subprocess.run")
-    def test_caches_label_avoids_duplicate_call(self, mock_run):
-        from src.issues import _ensure_label, _ensured_labels
-        _ensured_labels.clear()
-
-        mock_run.return_value = MagicMock(returncode=0, stdout="")
-
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         _ensure_label("news")
-        _ensure_label("news")  # second call should be cached
-
-        # Only one subprocess call, not two
+        _ensure_label("news")
         assert mock_run.call_count == 1
 
     @patch("src.issues.subprocess.run")
-    def test_different_labels_each_get_created(self, mock_run):
-        from src.issues import _ensure_label, _ensured_labels
+    def test_failed_label_creation_is_not_cached(self, mock_run):
+        from src.issues import GitHubCommandError, _ensure_label, _ensured_labels
+
         _ensured_labels.clear()
-
-        mock_run.return_value = MagicMock(returncode=0, stdout="")
-
-        _ensure_label("baseline")
-        _ensure_label("news")
-
-        assert mock_run.call_count == 2
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="denied")
+        with pytest.raises(GitHubCommandError):
+            _ensure_label("news")
+        assert "news" not in _ensured_labels
 
 
-class TestRunGhErrorLogging:
-    """Tests for _run_gh() error logging."""
-
+class TestRunGh:
     @patch("src.issues.subprocess.run")
-    def test_logs_error_on_failure(self, mock_run, caplog):
-        import logging
-        from src.issues import _run_gh
+    def test_failure_logs_and_raises(self, mock_run, caplog):
+        from src.issues import GitHubCommandError, _run_gh
 
-        mock_run.return_value = MagicMock(
-            returncode=1,
-            stdout="some output",
-            stderr="could not add label: 'baseline' not found",
-        )
-
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="could not add label")
         with caplog.at_level(logging.ERROR, logger="src.issues"):
-            _run_gh(["issue", "create", "--title", "test"])
-
+            with pytest.raises(GitHubCommandError, match="could not add label"):
+                _run_gh(["issue", "create"])
         assert "gh command failed" in caplog.text
-        assert "could not add label" in caplog.text
 
     @patch("src.issues.subprocess.run")
-    def test_no_log_on_success(self, mock_run, caplog):
-        import logging
+    def test_success_has_no_error_log(self, mock_run, caplog):
         from src.issues import _run_gh
 
-        mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
-
+        mock_run.return_value = MagicMock(returncode=0, stdout="[]", stderr="")
         with caplog.at_level(logging.ERROR, logger="src.issues"):
             _run_gh(["issue", "list"])
-
         assert "gh command failed" not in caplog.text

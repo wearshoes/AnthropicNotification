@@ -2,25 +2,30 @@ name: Monitor Anthropic Website
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # Every 30 minutes
-  workflow_dispatch:         # Manual trigger
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
   push:
     branches: [main]
-    paths: ['.github/workflows/monitor.yml']  # Only re-run on workflow changes
+    paths: ['.github/workflows/monitor.yml']
 
 permissions:
   issues: write
   contents: read
 
+concurrency:
+  group: anthropic-notification-monitor
+  cancel-in-progress: false
+
 jobs:
   monitor:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
           cache: 'pip'
@@ -28,14 +33,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Run tests
+        run: python -m pytest tests -q
+
       - name: Run monitor
         env:
           GH_TOKEN: ${{ github.token }}
           WECHAT_WORK_WEBHOOK: ${{ secrets.WECHAT_WORK_WEBHOOK }}
           DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
           DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
-          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
-          FEISHU_SECRET: ${{ secrets.FEISHU_SECRET }}
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-          CUSTOM_WEBHOOK: ${{ secrets.CUSTOM_WEBHOOK }}
         run: python -m src.main

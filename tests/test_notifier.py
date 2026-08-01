@@ -1,121 +1,47 @@
-"""Tests for src/notifier.py — written BEFORE implementation."""
+"""Tests for formatter discovery and durable notifier contracts."""
 
-import pytest
-from unittest.mock import patch, MagicMock
-import importlib
 import os
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 
 class TestDiscoverFormatters:
-    """Tests for discover_formatters() — convention-based discovery."""
-
     @patch.dict(os.environ, {"WECHAT_WORK_WEBHOOK": "https://example.com/hook"}, clear=False)
     @patch("src.notifier.importlib.import_module")
     @patch("src.notifier.FORMATTERS_DIR")
     def test_loads_formatter_when_env_var_exists(self, mock_dir, mock_import):
         from src.notifier import discover_formatters
-        from pathlib import Path
 
-        # Simulate wechat_work.py existing in formatters dir
         mock_dir.glob.return_value = [Path("src/formatters/wechat_work.py")]
-
-        mock_module = MagicMock()
-        mock_module.format_message = MagicMock()
-        mock_module.send = MagicMock()
-        mock_import.return_value = mock_module
-
-        formatters = discover_formatters()
-
-        found_names = [f["name"] for f in formatters]
-        assert "wechat_work" in found_names
+        mock_import.return_value = MagicMock()
+        assert [item["name"] for item in discover_formatters()] == ["wechat_work"]
 
     @patch.dict(os.environ, {}, clear=True)
-    def test_skips_formatter_when_no_env_var(self):
+    def test_skips_formatter_without_webhook(self):
         from src.notifier import discover_formatters
 
-        # With no env vars at all, no formatters should be enabled
-        formatters = discover_formatters()
+        assert discover_formatters() == []
 
-        assert len(formatters) == 0
-
-    @patch.dict(os.environ, {"WECHAT_WORK_WEBHOOK": "https://example.com/hook", "WECHAT_WORK_ENABLED": "false"}, clear=False)
-    def test_skips_formatter_when_explicitly_disabled(self):
+    @patch.dict(
+        os.environ,
+        {
+            "WECHAT_WORK_WEBHOOK": "https://example.com/hook",
+            "WECHAT_WORK_ENABLED": "false",
+        },
+        clear=False,
+    )
+    def test_skips_explicitly_disabled_formatter(self):
         from src.notifier import discover_formatters
 
-        formatters = discover_formatters()
+        assert "wechat_work" not in [item["name"] for item in discover_formatters()]
 
-        found_names = [f["name"] for f in formatters]
-        assert "wechat_work" not in found_names
+    @patch.dict(os.environ, {"WECHAT_WORK_WEBHOOK": "https://example.com/hook"}, clear=False)
+    @patch("src.notifier.importlib.import_module", side_effect=ImportError("broken"))
+    @patch("src.notifier.FORMATTERS_DIR")
+    def test_configured_broken_formatter_fails_closed(self, mock_dir, mock_import):
+        import pytest
+        from src.notifier import FormatterPlanningError, discover_formatters
 
-
-class TestSendNotifications:
-    """Tests for send_notifications()."""
-
-    @patch("src.notifier.enrich_urls")
-    def test_enriches_and_sends_to_all_formatters(self, mock_enrich):
-        from src.notifier import send_notifications
-
-        enriched = {
-            "news": [{"url": "https://www.anthropic.com/news/a", "title": "A", "description": None, "image": None}],
-            "research": [{"url": "https://www.anthropic.com/research/b", "title": "B", "description": None, "image": None}],
-        }
-        mock_enrich.return_value = enriched
-
-        mock_formatter = {
-            "name": "test_platform",
-            "module": MagicMock(),
-            "webhook_url": "https://example.com/hook",
-        }
-        mock_formatter["module"].format_message.return_value = {"msg": "test"}
-        mock_formatter["module"].send.return_value = None
-
-        changes = {
-            "news": {"https://www.anthropic.com/news/a"},
-            "research": {"https://www.anthropic.com/research/b"},
-        }
-
-        send_notifications([mock_formatter], changes)
-
-        mock_enrich.assert_called_once_with(changes)
-        mock_formatter["module"].format_message.assert_called_once_with(enriched)
-        mock_formatter["module"].send.assert_called_once_with({"msg": "test"}, "https://example.com/hook")
-
-    @patch("src.notifier.enrich_urls")
-    def test_one_failure_does_not_block_others(self, mock_enrich):
-        from src.notifier import send_notifications
-
-        mock_enrich.return_value = {"news": [{"url": "u", "title": "t", "description": None, "image": None}]}
-
-        failing_formatter = {
-            "name": "failing",
-            "module": MagicMock(),
-            "webhook_url": "https://fail.com",
-        }
-        failing_formatter["module"].format_message.side_effect = Exception("boom")
-
-        passing_formatter = {
-            "name": "passing",
-            "module": MagicMock(),
-            "webhook_url": "https://pass.com",
-        }
-        passing_formatter["module"].format_message.return_value = {"ok": True}
-        passing_formatter["module"].send.return_value = None
-
-        changes = {"news": {"https://www.anthropic.com/news/a"}}
-
-        send_notifications([failing_formatter, passing_formatter], changes)
-
-        passing_formatter["module"].send.assert_called_once()
-
-    def test_empty_changes_skips_notifications(self):
-        from src.notifier import send_notifications
-
-        mock_formatter = {
-            "name": "test",
-            "module": MagicMock(),
-            "webhook_url": "https://example.com",
-        }
-
-        send_notifications([mock_formatter], {})
-
-        mock_formatter["module"].format_message.assert_not_called()
+        mock_dir.glob.return_value = [Path("src/formatters/wechat_work.py")]
+        with pytest.raises(FormatterPlanningError, match="wechat_work"):
+            discover_formatters()

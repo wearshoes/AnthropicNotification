@@ -1,133 +1,77 @@
-"""Tests for src/formatters/dingtalk.py — written BEFORE implementation."""
+"""Tests for the DingTalk formatter."""
 
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+
+
+def _changes():
+    return {
+        "news": [{
+            "url": "https://www.anthropic.com/news/a",
+            "title": "Article A",
+            "description": None,
+            "image": None,
+        }]
+    }
 
 
 class TestFormatMessage:
-    """Tests for format_message() — enriched input."""
-
-    def test_formats_single_category(self):
+    def test_formats_markdown(self):
         from src.formatters.dingtalk import format_message
 
-        changes = {
-            "news": [
-                {"url": "https://www.anthropic.com/news/project-glasswing", "title": "Project Glasswing", "description": "A new initiative.", "image": None},
-            ],
-        }
-
-        payload = format_message(changes)
-
+        payload = format_message(_changes())
         assert payload["msgtype"] == "markdown"
-        assert "title" in payload["markdown"]
-        assert "text" in payload["markdown"]
-        assert "Project Glasswing" in payload["markdown"]["text"]
+        assert "Article A" in payload["markdown"]["text"]
+        assert payload["markdown"]["title"]
 
-    def test_formats_multiple_categories(self):
+    def test_multiple_categories(self):
         from src.formatters.dingtalk import format_message
 
-        changes = {
-            "news": [{"url": "https://www.anthropic.com/news/a", "title": "News A", "description": None, "image": None}],
-            "research": [{"url": "https://www.anthropic.com/research/b", "title": "Research B", "description": None, "image": None}],
-        }
-
-        payload = format_message(changes)
-
-        text = payload["markdown"]["text"]
-        assert "news" in text.lower()
-        assert "research" in text.lower()
+        changes = _changes()
+        changes["research"] = [{
+            "url": "https://www.anthropic.com/research/b",
+            "title": "Paper B",
+            "description": None,
+            "image": None,
+        }]
+        text = format_message(changes)["markdown"]["text"].lower()
+        assert "news" in text and "research" in text
 
     def test_empty_changes_returns_none(self):
         from src.formatters.dingtalk import format_message
 
-        result = format_message({})
-
-        assert result is None
-
-    def test_title_is_summary(self):
-        from src.formatters.dingtalk import format_message
-
-        changes = {"news": [{"url": "https://www.anthropic.com/news/a", "title": "Article A", "description": None, "image": None}]}
-
-        payload = format_message(changes)
-
-        assert payload["markdown"]["title"]  # non-empty title
+        assert format_message({}) is None
 
 
 class TestSend:
-    """Tests for send()."""
-
-    @patch("src.formatters.dingtalk.requests.post")
+    @patch("src.formatters.dingtalk.post_json")
     @patch.dict("os.environ", {"DINGTALK_SECRET": "test_secret"})
     def test_signs_request_with_hmac(self, mock_post):
         from src.formatters.dingtalk import send
 
-        mock_post.return_value = MagicMock(status_code=200)
-        mock_post.return_value.raise_for_status = MagicMock()
-        payload = {"msgtype": "markdown", "markdown": {"title": "t", "text": "t"}}
-
+        payload = {"msgtype": "markdown"}
         send(payload, "https://oapi.dingtalk.com/robot/send?access_token=xxx")
+        called_url = mock_post.call_args.args[0]
+        assert "timestamp=" in called_url and "sign=" in called_url
+        assert mock_post.call_args.args[1] == payload
 
-        called_url = mock_post.call_args[0][0]
-        assert "timestamp=" in called_url
-        assert "sign=" in called_url
-
-    @patch("src.formatters.dingtalk.requests.post")
+    @patch("src.formatters.dingtalk.post_json")
     @patch.dict("os.environ", {}, clear=True)
     def test_sends_without_signing_when_no_secret(self, mock_post):
         from src.formatters.dingtalk import send
 
-        mock_post.return_value = MagicMock(status_code=200)
-        mock_post.return_value.raise_for_status = MagicMock()
-        payload = {"msgtype": "markdown", "markdown": {"title": "t", "text": "t"}}
-
-        send(payload, "https://oapi.dingtalk.com/robot/send?access_token=xxx")
-
-        called_url = mock_post.call_args[0][0]
-        assert called_url == "https://oapi.dingtalk.com/robot/send?access_token=xxx"
-
-    @patch("src.formatters.dingtalk.requests.post")
-    @patch.dict("os.environ", {}, clear=True)
-    def test_posts_correct_payload(self, mock_post):
-        from src.formatters.dingtalk import send
-
-        mock_post.return_value = MagicMock(status_code=200)
-        mock_post.return_value.raise_for_status = MagicMock()
-        payload = {"msgtype": "markdown", "markdown": {"title": "t", "text": "t"}}
-
-        send(payload, "https://example.com/webhook")
-
-        assert mock_post.call_args[1]["json"] == payload
-
-    @patch("src.formatters.dingtalk.requests.post")
-    @patch.dict("os.environ", {}, clear=True)
-    def test_raises_on_http_error(self, mock_post):
-        from src.formatters.dingtalk import send
-
-        mock_response = MagicMock()
-        mock_response.raise_for_status.side_effect = Exception("500 Server Error")
-        mock_post.return_value = mock_response
-
-        with pytest.raises(Exception):
-            send({"msgtype": "markdown", "markdown": {"title": "t", "text": "t"}}, "https://example.com")
+        payload = {"msgtype": "markdown"}
+        url = "https://example.com/webhook"
+        send(payload, url)
+        mock_post.assert_called_once_with(url, payload)
 
 
 class TestSignature:
-    """Tests for _compute_sign() helper."""
-
     def test_signature_is_deterministic(self):
         from src.formatters.dingtalk import _compute_sign
 
-        sign1 = _compute_sign(1234567890000, "test_secret")
-        sign2 = _compute_sign(1234567890000, "test_secret")
+        assert _compute_sign(1234567890000, "secret") == _compute_sign(1234567890000, "secret")
 
-        assert sign1 == sign2
-        assert len(sign1) > 0
-
-    def test_different_timestamps_produce_different_signs(self):
+    def test_different_timestamps_change_signature(self):
         from src.formatters.dingtalk import _compute_sign
 
-        sign1 = _compute_sign(1234567890000, "test_secret")
-        sign2 = _compute_sign(1234567890001, "test_secret")
-
-        assert sign1 != sign2
+        assert _compute_sign(1, "secret") != _compute_sign(2, "secret")

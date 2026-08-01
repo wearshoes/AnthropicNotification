@@ -2,217 +2,120 @@
 
 English | [中文](README.md)
 
-Monitor [Anthropic](https://www.anthropic.com) website for new content and receive webhook notifications.
+Monitor new content published on [Anthropic](https://www.anthropic.com) and deliver webhook notifications through WeChat Work or DingTalk.
 
 ## Features
 
-- **Sitemap-based** change detection — stable and reliable, no dependency on HTML structure
-- **GitHub Issues** as state storage — no database or external services needed
-- Multi-platform **Webhook notifications** (WeChat Work, DingTalk, Feishu, Slack, Custom)
-- **Page metadata enrichment**: auto-fetches article title, description, and cover image for richer notifications
-- **GitHub Actions** automation, checks every 30 minutes
-- Convention-based **Formatter discovery** — add a notification platform by adding one file
-- **Issue lifecycle management**: only keeps the latest update issue per category, auto-closes old ones
-- Silent baseline creation on first run — no notification flood
+- Sitemap-based monitoring for news, research, engineering, and learn pages
+- GitHub Issues as a durable baseline and notification outbox
+- At-least-once delivery with per-message receipts and automatic retry
+- Complete message chunking: WeChat Work sends at most 8 articles per message without dropping the remainder
+- Automatic outbox-event splitting when a batch would exceed the GitHub Issue body limit
+- Page title, description, and cover-image enrichment
+- Fail-closed GitHub and webhook operations
+- Serialized, time-bounded GitHub Actions runs
+- Silent baseline creation on first run
 
-## How It Works
+## Reliability Model
 
-```
-                    ┌──────────────┐
-                    │ Sitemap.xml  │
-                    └──────┬───────┘
-                           │
-                    ┌──────▼───────┐
-                    │ Filter by    │  news / research / engineering / learn
-                    │ category     │
-                    └──────┬───────┘
-                           │
-                    ┌──────▼───────┐     ┌──────────────┐
-                    │ Compare with │◄────│ GitHub Issues│
-                    │ baseline     │     │ (state store)│
-                    └──────┬───────┘     └──────────────┘
-                           │
-                    ┌──────▼───────┐
-                    │ New content  │
-                    │ found        │
-                    └──────┬───────┘
-                           │
-              ┌────────────┼────────────┐
-              ▼            ▼            ▼
-       Create agg.    Update       Enrich metadata
-       Issue          baseline     + Send webhook
-       (close old)    (add URLs)   (title/desc/image)
-```
+New URLs are processed in this order:
 
-1. Fetches `https://www.anthropic.com/sitemap.xml` every 30 minutes via GitHub Actions
-2. Filters URLs into 4 categories
-3. Compares against baseline URLs stored in GitHub Issues
-4. For new URLs:
-   - Creates one aggregated Issue per category, auto-closes old update Issues
-   - Fetches each page's title/description/image metadata
-   - Sends rich notifications with cover images and article titles
-5. First run silently creates the baseline (no notifications)
+1. Validate and canonicalize the sitemap snapshot.
+2. Enrich the new pages and persist fixed targets, destination fingerprints, and payload chunks in one or more size-bounded outbox Issues.
+3. Re-read the Issue to verify persistence.
+4. Extend the baseline using `known URLs ∪ current URLs`.
+5. Send each pending chunk and persist its receipt immediately.
+6. Mark the Issue delivered after every target chunk has a receipt.
+
+Webhook APIs do not provide an idempotency key. If a process stops after a webhook accepts a message but before its receipt is saved, that chunk can be sent again. The guarantee is therefore durable **at-least-once delivery**, not exactly-once delivery. A GitHub API failure, missing target credential, formatter-version mismatch, HTTP failure, or non-zero platform `errcode` keeps work pending and fails the run.
+
+The workflow requests a run every 30 minutes, but GitHub Actions scheduled execution is best-effort and can be delayed or skipped by GitHub. Use `workflow_dispatch` when an immediate check is required.
 
 ## Monitored Pages
 
 | Category | URL Pattern | Content |
 |----------|-------------|---------|
-| news | `/news/*` | Product launches, company announcements |
-| research | `/research/*` | AI safety papers, technical reports |
-| engineering | `/engineering/*` | Engineering blog posts |
+| news | `/news/*` | Product launches and company announcements |
+| research | `/research/*` | AI safety papers and technical reports |
+| engineering | `/engineering/*` | Engineering posts |
 | learn | `/learn/*` | Anthropic Academy courses |
+
+Only canonical HTTPS URLs on the exact `www.anthropic.com` host are accepted. A snapshot is rejected unless all four categories are non-empty and their combined content count is at least 300. Existing baselines never shrink.
 
 ## Quick Start
 
-### Step 1: Fork This Repository
+1. Fork this repository.
+2. In **Settings → Secrets and variables → Actions**, configure at least one implemented webhook:
 
-Click the **Fork** button at the top right of this repository.
+| Secret | Description | Required |
+|--------|-------------|----------|
+| `WECHAT_WORK_WEBHOOK` | WeChat Work bot webhook URL | At least one target |
+| `DINGTALK_WEBHOOK` | DingTalk custom robot webhook URL | At least one target |
+| `DINGTALK_SECRET` | Optional DingTalk signing secret | Optional |
 
-### Step 2: Configure Webhook Secrets
+3. Enable GitHub Actions in the fork.
+4. Run **Monitor Anthropic Website** manually once.
 
-1. Go to your forked repository
-2. Navigate to **Settings** → **Secrets and variables** → **Actions**
-3. Click **New repository secret**
-4. Add the webhook URL(s) for your notification platforms:
-
-| Secret Name | Description | Required |
-|-------------|-------------|----------|
-| `WECHAT_WORK_WEBHOOK` | WeChat Work bot webhook URL | At least one |
-| `DINGTALK_WEBHOOK` | DingTalk custom robot webhook URL | Optional |
-| `DINGTALK_SECRET` | DingTalk robot signing secret | Optional |
-| `FEISHU_WEBHOOK` | Feishu/Lark custom bot webhook URL | Optional |
-| `FEISHU_SECRET` | Feishu bot signing secret | Optional |
-| `SLACK_WEBHOOK` | Slack incoming webhook URL | Optional |
-| `CUSTOM_WEBHOOK` | Any custom webhook endpoint | Optional |
-
-> A notification channel is automatically enabled when its webhook secret is set. No additional configuration needed.
-
-### Step 3: Enable GitHub Actions
-
-1. Go to the **Actions** tab in your forked repository
-2. If you see "Workflows aren't being run on this forked repository", click **I understand my workflows, go ahead and enable them**
-3. Find **Monitor Anthropic Website** workflow
-4. Click **Run workflow** → **Run workflow** to trigger manually
-
-### Step 4: Verify
-
-The first run will:
-- Create 4 baseline Issues ([Baseline] news / research / engineering / learn)
-- **Not send any notifications** (expected — silent baseline creation)
-
-After that, it checks every 30 minutes. When Anthropic publishes new content, you will:
-- Receive a rich notification with cover image and article title
-- See an aggregated update Issue (old ones per category auto-closed)
+The first successful run creates one baseline Issue for each of the four categories and sends no notification. Later runs create machine-owned update Issues for newly accepted content. If no formatter is enabled when new content appears, the run fails and the baseline does not advance.
 
 ## Supported Platforms
 
 | Platform | Formatter | Message Format | Signing |
-|----------|-----------|---------------|---------|
-| WeChat Work | `wechat_work.py` | News card (image + title) | None |
-| DingTalk | `dingtalk.py` | Markdown link list | HMAC-SHA256 (optional) |
+|----------|-----------|----------------|---------|
+| WeChat Work | `wechat_work.py` | News cards, chunked at 8 articles | None |
+| DingTalk | `dingtalk.py` | Markdown links, chunked at 20 items | Optional HMAC-SHA256 |
 
-## Adding a Notification Platform
+Feishu, Slack, and custom webhooks are not implemented in this repository.
 
-Create a new Python file in `src/formatters/`:
+## Adding a Platform
 
-```
-src/formatters/my_platform.py
-```
-
-The file must export two functions:
+Create `src/formatters/my_platform.py` with:
 
 ```python
+FORMATTER_VERSION = 1
+MAX_ITEMS_PER_MESSAGE = 10
+
 def format_message(changes: dict[str, list[dict]]) -> dict | None:
-    """Format changes into platform-specific payload.
-    
-    changes format: {"news": [{"url": "...", "title": "...", "description": "...", "image": "..."}]}
-    """
     ...
 
 def send(payload: dict, webhook_url: str) -> None:
-    """Send payload to the webhook."""
     ...
 ```
 
-Then add `MY_PLATFORM_WEBHOOK` to GitHub Secrets.
+`send()` must raise unless both HTTP and platform-level business status confirm success. Then add `MY_PLATFORM_WEBHOOK` to both GitHub Secrets and the `Run monitor` environment in `.github/workflows/monitor.yml`. Existing pending events retain the formatter target, destination fingerprint, contract version, chunk membership, and payload captured when they were created; changing a target URL blocks old pending delivery instead of silently rerouting it.
 
-The system auto-discovers formatters: filename `my_platform.py` maps to env var `MY_PLATFORM_WEBHOOK`.
-
-See `src/formatters/_template.py` for the full interface contract, and `src/formatters/_styles/` for message style catalogs per platform.
+See `src/formatters/_template.py` for the complete contract.
 
 ## Architecture
 
-```
+```text
 src/
-├── main.py              # Orchestrator: sitemap → detector → issues → notifier
-├── sitemap.py           # Fetch and parse sitemap.xml, filter by category
-├── detector.py          # Compare sitemap URLs vs baseline, find new content
-├── issues.py            # GitHub Issues via gh CLI (baseline + updates + auto-close)
-├── enrichment.py        # Fetch page metadata (og:title, og:description, og:image)
-├── notifier.py          # Convention-based formatter discovery + enrichment + dispatch
+├── main.py              # Drain pending work, ingest snapshots, finalize events
+├── sitemap.py           # Trusted fetch, canonicalization, category filtering
+├── detector.py          # Snapshot guard, delta detection, durable ordering
+├── outbox.py            # Stable identities, immutable chunks, receipts
+├── issues.py            # Verified GitHub Issue state operations
+├── enrichment.py        # Metadata fetch with redirect validation
+├── notifier.py          # Formatter discovery, planning, chunk delivery
+├── webhook_http.py      # Retry and business-response validation
 └── formatters/
-    ├── _template.py     # Formatter code template
-    ├── _styles/         # Message style catalogs per platform
-    │   ├── wechat_work.md
-    │   ├── dingtalk.md
-    │   ├── feishu.md
-    │   └── slack.md
-    ├── wechat_work.py   # WeChat Work news card formatter
-    └── dingtalk.py      # DingTalk markdown formatter (HMAC-SHA256 signing)
-
-tests/                   # Unit tests (pytest, 68 tests)
-.github/workflows/
-    └── monitor.yml      # GitHub Actions workflow (every 30 minutes)
-.githooks/
-    └── commit-msg       # Git commit message format validation
+    ├── _template.py
+    ├── wechat_work.py
+    └── dingtalk.py
 ```
-
-## CodeBuddy Skills
-
-This project integrates [CodeBuddy Code](https://cnb.cool/codebuddy/codebuddy-code) Skills for automated development workflows:
-
-| Command | Description |
-|---------|-------------|
-| `/formatter:add <platform>` | Add a notification platform with full OpenSpec + TDD workflow, including message style selection |
-| `/category:add <name> <path>` | Add a monitored category, updating code + tests + docs |
-| `/opsx:explore` | Enter explore mode — think through problems with compound interest lens |
-| `/opsx:propose` | Create an OpenSpec change proposal (proposal → specs → design → tasks) |
-| `/opsx:apply` | Implement change tasks with TDD (RED → GREEN → REFACTOR) |
-| `/opsx:archive` | Archive change, sync specs, commit and push |
-
-### Workflow Guard Hooks
-
-| Hook | Type | Purpose |
-|------|------|---------|
-| `tdd-guard.sh` | PreToolUse | Requires test file before writing to src/ |
-| `tdd-autotest.sh` | PostToolUse | Auto-runs pytest after writing src/ files |
-| `openspec-guard.sh` | PreToolUse | Reminds to create OpenSpec change before modifying src/ |
-| `ci-status.sh` | PostToolUse | Auto-queries GitHub Actions status after git push |
-| `commit-msg` | Git Hook | Enforces `<type>: <description>` commit format |
 
 ## Local Development
 
+Python 3.11+ and the GitHub CLI (`gh`) are required for a full non-dry run.
+
 ```bash
-# Install dependencies
 pip install -r requirements.txt
-
-# Configure git hooks (commit message validation)
 git config core.hooksPath .githooks
-
-# Run tests
-python -m pytest tests/ -v
-
-# Fetch sitemap only (no detection or notification)
+python -m pytest tests -v
 python -m src.main --dry-run
 ```
 
-### Commit Convention
-
-```
-<type>: <description>
-
-type: feat | fix | docs | refactor | test | chore
-```
+Commits use `<type>: <description>`, where type is one of `feat`, `fix`, `docs`, `refactor`, `test`, or `chore`.
 
 ## License
 

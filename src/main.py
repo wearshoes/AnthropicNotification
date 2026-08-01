@@ -1,10 +1,14 @@
-"""Main orchestrator — sitemap → detector → issues → notifier."""
+"""Main orchestrator for durable at-least-once notification delivery."""
+
+from __future__ import annotations
 
 import argparse
 import logging
 import sys
 
-from src import sitemap, detector, notifier
+from src import detector, issues, notifier, sitemap
+from src.outbox import OutboxEvent
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -13,50 +17,111 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def run(dry_run: bool = False) -> dict[str, set[str]] | None:
-    """Run the full monitoring pipeline."""
+class PipelineDeliveryError(RuntimeError):
+    """Raised after all independent delivery attempts have completed."""
+
+
+def _find_conflicting_pending_owners(
+    events: list[OutboxEvent],
+) -> tuple[set[int | None], list[str]]:
+    owners: dict[str, set[int | None]] = {}
+    for event in events:
+        if event.status != "pending":
+            continue
+        for item in event.items:
+            owners.setdefault(item.item_id, set()).add(event.issue_number)
+    conflicts = set()
+    failures = []
+    for item_id, issue_numbers in owners.items():
+        if len(issue_numbers) > 1:
+            conflicts.update(issue_numbers)
+            rendered = ", ".join(f"#{number}" for number in sorted(issue_numbers))
+            failures.append(f"Pending item {item_id} has multiple owners: {rendered}")
+    return conflicts, failures
+
+
+def _deliver_and_finalize(event: OutboxEvent, formatters: list[dict]) -> OutboxEvent:
+    delivered = notifier.deliver_event(
+        event,
+        formatters,
+        save_event=issues.save_outbox_event,
+    )
+    if delivered.status == "delivered":
+        # Keep the event discoverable as pending until every finalization step succeeds.
+        issues.close_old_update_issues(
+            delivered.category,
+            exclude_number=delivered.issue_number,
+        )
+        issues.finalize_outbox_event(delivered)
+    return delivered
+
+
+def _fetch_categorized() -> dict[str, set[str]]:
     logger.info("Fetching sitemap...")
     entries = sitemap.fetch_sitemap()
     categorized = sitemap.filter_by_category(entries)
+    sitemap.validate_snapshot_shape(categorized)
+    logger.info(
+        "Found %s URLs across %s categories",
+        sum(len(value) for value in categorized.values()),
+        len(categorized),
+    )
+    for category, urls in categorized.items():
+        logger.info("  %s: %s URLs", category, len(urls))
+    return categorized
 
-    logger.info(f"Found {sum(len(v) for v in categorized.values())} URLs across {len(categorized)} categories")
-    for cat, urls in categorized.items():
-        logger.info(f"  {cat}: {len(urls)} URLs")
 
+def run(dry_run: bool = False) -> dict[str, set[str]] | None:
+    """Repair and drain pending work, then accept and deliver a new snapshot."""
     if dry_run:
-        logger.info("Dry run — skipping detection and notification")
+        categorized = _fetch_categorized()
+        logger.info("Dry run: skipping detection and notification")
         return categorized
 
-    # Detect changes per category
-    all_changes: dict[str, set[str]] = {}
-    for category, urls in categorized.items():
-        if not urls:
+    formatters = notifier.discover_formatters()
+    pending_events = issues.list_pending_events()
+    conflicting_issues, ownership_failures = _find_conflicting_pending_owners(
+        pending_events
+    )
+    delivery_failures = list(ownership_failures)
+
+    for event in pending_events:
+        if event.issue_number in conflicting_issues:
             continue
-        new_urls = detector.process_category(category, urls)
-        if new_urls:
-            all_changes[category] = new_urls
+        detector.ensure_event_in_baseline(event)
+        try:
+            _deliver_and_finalize(event, formatters)
+        except notifier.DeliveryError as exc:
+            delivery_failures.append(str(exc))
 
-    # Send notifications
-    if all_changes:
-        total_new = sum(len(v) for v in all_changes.values())
-        logger.info(f"Found {total_new} new URL(s) — sending notifications")
-        formatters = notifier.discover_formatters()
-        notifier.send_notifications(formatters, all_changes)
-    else:
-        logger.info("No new content detected")
+    categorized = _fetch_categorized()
+    known_events = list(pending_events)
+    for category, urls in categorized.items():
+        new_events = detector.process_category(category, urls, known_events, formatters)
+        known_events.extend(new_events)
+        for event in new_events:
+            try:
+                _deliver_and_finalize(event, formatters)
+            except notifier.DeliveryError as exc:
+                delivery_failures.append(str(exc))
 
+    if delivery_failures:
+        raise PipelineDeliveryError(" | ".join(delivery_failures))
     return None
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Monitor Anthropic website for updates")
-    parser.add_argument("--dry-run", action="store_true", help="Fetch and parse sitemap only, no detection or notification")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Fetch and parse sitemap only, no detection or notification",
+    )
     args = parser.parse_args()
-
     try:
         run(dry_run=args.dry_run)
-    except Exception as e:
-        logger.error(f"Fatal error: {e}")
+    except Exception as exc:
+        logger.error("Fatal error: %s", exc)
         sys.exit(1)
 
 

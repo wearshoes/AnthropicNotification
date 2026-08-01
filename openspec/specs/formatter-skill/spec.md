@@ -12,7 +12,7 @@
 - **THEN** the skill SHALL derive file paths (`src/formatters/{name}.py`, `tests/formatters/test_{name}.py`) and env var name (`{NAME}_WEBHOOK`) from the platform name
 
 ### Requirement: 代码模板
-`src/formatters/_template.py` SHALL serve as a reference template showing the formatter interface contract: `format_message(changes)` and `send(payload, webhook_url)`.
+`src/formatters/_template.py` SHALL serve as a reference template showing the versioned formatter interface contract: `FORMATTER_VERSION`, `MAX_ITEMS_PER_MESSAGE`, `format_message(changes)`, and `send(payload, webhook_url)`.
 
 #### Scenario: AI reads template before implementing
 - **WHEN** the skill starts implementing a new formatter
@@ -23,4 +23,4 @@
 
 #### Scenario: AI generates tests from template
 - **WHEN** the skill enters TDD RED phase
-- **THEN** it SHALL reference `_template_test.py` to generate platform-specific tests covering: format single/multiple categories, empty changes, size truncation, send POST, send error handling
+- **THEN** it SHALL reference `_template_test.py` to generate platform-specific tests covering the version and chunk-size contract, single/multiple category formatting, empty changes, verified send, and send error propagation
