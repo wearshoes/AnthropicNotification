@@ -75,7 +75,7 @@ class TestRun:
         event = _event()
         delivered = record_receipt(event, event.chunks[0].chunk_id)
         mock_issues.list_pending_events.return_value = []
-        mock_sitemap.fetch_sitemap.return_value = [{"loc": event.items[0].url}]
+        mock_sitemap.fetch_sitemaps.return_value = [{"loc": event.items[0].url}]
         mock_sitemap.filter_by_category.return_value = {
             "news": {event.items[0].url}, "research": set(),
             "engineering": set(), "learn": set(),
@@ -100,7 +100,7 @@ class TestRun:
         from src.main import run
 
         mock_issues.list_pending_events.return_value = []
-        mock_sitemap.fetch_sitemap.return_value = []
+        mock_sitemap.fetch_sitemaps.return_value = []
         mock_sitemap.filter_by_category.return_value = {
             "news": set(), "research": set(), "engineering": set(), "learn": set()
         }
@@ -119,7 +119,7 @@ class TestRun:
 
         mock_issues.list_pending_events.return_value = []
         mock_notifier.discover_formatters.return_value = []
-        mock_sitemap.fetch_sitemap.side_effect = RuntimeError("network error")
+        mock_sitemap.fetch_sitemaps.side_effect = RuntimeError("network error")
         with pytest.raises(RuntimeError, match="network error"):
             run()
 
@@ -135,7 +135,7 @@ class TestDryRun:
         from src.main import run
 
         categorized = {"news": {"https://www.anthropic.com/news/a"}}
-        mock_sitemap.fetch_sitemap.return_value = []
+        mock_sitemap.fetch_sitemaps.return_value = []
         mock_sitemap.filter_by_category.return_value = categorized
         assert run(dry_run=True) == categorized
         mock_issues.list_pending_events.assert_not_called()

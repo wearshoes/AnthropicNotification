@@ -91,6 +91,19 @@ class TestEnrichUrl:
         # Generic Anthropic description should be filtered out
         assert result["description"] is None
 
+    @patch("src.enrichment.requests.get")
+    def test_accepts_exact_academy_origin(self, mock_get):
+        from src.enrichment import enrich_url
+
+        mock_response = MagicMock(status_code=200, text=MINIMAL_HTML)
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        result = enrich_url("https://academy.claude.com/collections/claude-for-you")
+
+        assert result["url"] == "https://academy.claude.com/collections/claude-for-you"
+        assert mock_get.call_args.args[0] == result["url"]
+
 
 class TestEnrichUrls:
     """Tests for enrich_urls() — batch enrichment."""

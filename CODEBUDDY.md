@@ -1,6 +1,6 @@
 # CODEBUDDY.md
 
-This repository monitors Anthropic's sitemap, stores durable state in GitHub Issues, and sends WeChat Work or DingTalk webhook notifications.
+This repository monitors Anthropic and Claude Academy sitemaps, stores durable state in GitHub Issues, and sends WeChat Work or DingTalk webhook notifications.
 
 ## Compound Interest Principle
 
@@ -114,7 +114,7 @@ python -m src.main  # requires gh and GH_TOKEN
 
 ## Adding a Category
 
-1. Add its path prefix to `CATEGORIES` in `src/sitemap.py`.
+1. Add its exact host and path prefix route to `CATEGORIES` in `src/sitemap.py`.
 2. Write sitemap and snapshot-guard tests first.
 3. Update both READMEs and OpenSpec.
 4. Ensure first-run and empty-category baseline behavior remains explicit.

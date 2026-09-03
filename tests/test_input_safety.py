@@ -11,9 +11,14 @@ def test_sitemap_filter_rejects_lookalike_and_non_https_origins():
         {"loc": "https://www.anthropic.com.evil.test/news/invalid", "lastmod": None},
         {"loc": "http://www.anthropic.com/news/insecure", "lastmod": None},
         {"loc": "https://user@www.anthropic.com/news/credentials", "lastmod": None},
+        {"loc": "https://academy.claude.com/collections/valid", "lastmod": None},
+        {"loc": "https://academy.claude.com.evil.test/collections/invalid", "lastmod": None},
     ]
     assert filter_by_category(entries)["news"] == {
         "https://www.anthropic.com/news/valid"
+    }
+    assert filter_by_category(entries)["learn"] == {
+        "https://academy.claude.com/collections/valid"
     }
 
 

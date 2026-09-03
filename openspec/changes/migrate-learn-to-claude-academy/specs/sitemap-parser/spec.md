@@ -1,4 +1,4 @@
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Parse configured sitemap XML sources
 The system SHALL fetch both `https://www.anthropic.com/sitemap.xml` and `https://academy.claude.com/sitemap.xml` and combine the `loc` and optional `lastmod` entries into one snapshot.
@@ -11,32 +11,13 @@ The system SHALL fetch both `https://www.anthropic.com/sitemap.xml` and `https:/
 ### Requirement: Trusted canonical content URLs
 Only category routes on the exact `https://www.anthropic.com` and `https://academy.claude.com` origins SHALL enter monitored categories. Query strings and fragments SHALL be removed from item identity. Every redirect target followed during sitemap or metadata fetches SHALL be validated before the next request.
 
-#### Scenario: Lookalike host
-- **WHEN** an entry uses `https://www.anthropic.com.evil.test/news/a`
+#### Scenario: Academy lookalike host
+- **WHEN** an entry uses `https://academy.claude.com.evil.test/collections/a`
 - **THEN** it SHALL be excluded from every category
-
-#### Scenario: Unconfigured-origin redirect
-- **WHEN** a content page redirects to an origin outside the exact trusted set
-- **THEN** the unconfigured origin SHALL NOT be requested
 
 ### Requirement: Filter categories
 Trusted Anthropic URLs SHALL be grouped by `/news/`, `/research/`, and `/engineering/`. Trusted Claude Academy URLs under `/collections/` SHALL be grouped as `learn`. Category index pages, legacy `/learn/*` paths, Academy lessons, and unrelated paths SHALL be excluded.
 
-#### Scenario: Category index
-- **WHEN** a URL path is exactly `/news`
-- **THEN** it SHALL NOT be classified as an article
-
 #### Scenario: Academy course lesson
 - **WHEN** an Academy URL uses the `/courses/` prefix
 - **THEN** it SHALL NOT be classified as a learn collection
-
-### Requirement: Snapshot completeness guard
-The system SHALL reject every sitemap snapshot unless all configured categories are non-empty and the combined monitored URL count is at least 300. Existing baselines SHALL never shrink.
-
-#### Scenario: Grossly partial initial snapshot
-- **WHEN** no baseline exists and the sitemap contains fewer than 300 monitored URLs or an empty configured category
-- **THEN** processing SHALL fail before creating a baseline
-
-#### Scenario: Existing URL disappears
-- **WHEN** a valid snapshot no longer contains a previously known URL
-- **THEN** the saved baseline SHALL retain that URL

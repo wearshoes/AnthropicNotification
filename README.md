@@ -2,11 +2,11 @@
 
 [English](README_EN.md) | 中文
 
-监控 [Anthropic](https://www.anthropic.com) 发布的新内容，并通过企业微信或钉钉 Webhook 推送通知。
+监控 [Anthropic](https://www.anthropic.com) 和 [Claude Academy](https://academy.claude.com) 发布的新内容，并通过企业微信或钉钉 Webhook 推送通知。
 
 ## 功能特性
 
-- 基于 Sitemap 监控 news、research、engineering、learn 四类内容
+- 基于两个 Sitemap 监控 news、research、engineering、learn 四类内容
 - 使用 GitHub Issues 保存持久化基线和通知 outbox
 - 至少一次投递：按消息块记录回执，失败后自动重试
 - 完整分块：企业微信每条最多 8 篇，多出的内容继续发送，不再截断丢失
@@ -33,14 +33,14 @@ workflow 每 30 分钟请求调度一次，但 GitHub Actions 的定时任务是
 
 ## 监控页面
 
-| 分类 | URL 路径 | 内容类型 |
-|------|----------|----------|
-| news | `/news/*` | 产品发布、公司公告 |
-| research | `/research/*` | AI 安全论文、技术报告 |
-| engineering | `/engineering/*` | 工程博客 |
-| learn | `/learn/*` | Anthropic Academy 课程 |
+| 分类 | 来源与 URL 路径 | 内容类型 |
+|------|-----------------|----------|
+| news | `www.anthropic.com/news/*` | 产品发布、公司公告 |
+| research | `www.anthropic.com/research/*` | AI 安全论文、技术报告 |
+| engineering | `www.anthropic.com/engineering/*` | 工程博客 |
+| learn | `academy.claude.com/collections/*` | Claude Academy 学习集合 |
 
-系统只接受精确位于 `https://www.anthropic.com` 的规范 URL。四个分类必须都非空且内容总数不少于 300，否则拒绝该快照；已有基线不会缩小。
+系统只接受与分类路由匹配、精确位于 `https://www.anthropic.com` 或 `https://academy.claude.com` 的规范 URL。Academy 的课程章节、教程和索引页不进入 learn 分类。四个分类必须都非空且内容总数不少于 300，否则拒绝该快照；已有基线不会缩小。
 
 ## 快速开始
 

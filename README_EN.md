@@ -2,11 +2,11 @@
 
 English | [中文](README.md)
 
-Monitor new content published on [Anthropic](https://www.anthropic.com) and deliver webhook notifications through WeChat Work or DingTalk.
+Monitor new content published on [Anthropic](https://www.anthropic.com) and [Claude Academy](https://academy.claude.com), then deliver webhook notifications through WeChat Work or DingTalk.
 
 ## Features
 
-- Sitemap-based monitoring for news, research, engineering, and learn pages
+- Two-sitemap monitoring for news, research, engineering, and learn pages
 - GitHub Issues as a durable baseline and notification outbox
 - At-least-once delivery with per-message receipts and automatic retry
 - Complete message chunking: WeChat Work sends at most 8 articles per message without dropping the remainder
@@ -33,14 +33,14 @@ The workflow requests a run every 30 minutes, but GitHub Actions scheduled execu
 
 ## Monitored Pages
 
-| Category | URL Pattern | Content |
-|----------|-------------|---------|
-| news | `/news/*` | Product launches and company announcements |
-| research | `/research/*` | AI safety papers and technical reports |
-| engineering | `/engineering/*` | Engineering posts |
-| learn | `/learn/*` | Anthropic Academy courses |
+| Category | Source and URL Pattern | Content |
+|----------|------------------------|---------|
+| news | `www.anthropic.com/news/*` | Product launches and company announcements |
+| research | `www.anthropic.com/research/*` | AI safety papers and technical reports |
+| engineering | `www.anthropic.com/engineering/*` | Engineering posts |
+| learn | `academy.claude.com/collections/*` | Claude Academy learning collections |
 
-Only canonical HTTPS URLs on the exact `www.anthropic.com` host are accepted. A snapshot is rejected unless all four categories are non-empty and their combined content count is at least 300. Existing baselines never shrink.
+Only category-routed canonical HTTPS URLs on the exact `www.anthropic.com` or `academy.claude.com` host are accepted. Academy course lessons, tutorials, and index pages do not enter the learn category. A snapshot is rejected unless all four categories are non-empty and their combined content count is at least 300. Existing baselines never shrink.
 
 ## Quick Start
 

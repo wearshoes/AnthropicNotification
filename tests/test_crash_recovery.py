@@ -107,7 +107,7 @@ def test_main_repairs_pending_baseline_before_delivery_even_if_sitemap_fails(
     mock_notifier.discover_formatters.return_value = [{"name": "wechat_work"}]
     mock_detector.ensure_event_in_baseline.side_effect = lambda value: order.append("baseline")
     mock_notifier.deliver_event.side_effect = lambda *args, **kwargs: order.append("delivery") or event
-    mock_sitemap.fetch_sitemap.side_effect = lambda: order.append("sitemap") or (_ for _ in ()).throw(
+    mock_sitemap.fetch_sitemaps.side_effect = lambda: order.append("sitemap") or (_ for _ in ()).throw(
         RuntimeError("sitemap unavailable")
     )
 

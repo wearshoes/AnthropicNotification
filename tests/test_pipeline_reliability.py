@@ -126,7 +126,7 @@ def test_pending_delivery_precedes_sitemap_failure(
     mock_issues.list_pending_events.return_value = [event]
     mock_notifier.discover_formatters.return_value = [_formatter()]
     mock_notifier.deliver_event.return_value = event
-    mock_sitemap.fetch_sitemap.side_effect = RuntimeError("sitemap unavailable")
+    mock_sitemap.fetch_sitemaps.side_effect = RuntimeError("sitemap unavailable")
     with pytest.raises(RuntimeError, match="sitemap unavailable"):
         run()
     mock_detector.ensure_event_in_baseline.assert_called_once_with(event)

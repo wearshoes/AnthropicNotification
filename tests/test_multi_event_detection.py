@@ -77,7 +77,7 @@ def test_duplicate_owner_is_quarantined_without_blocking_unrelated_pending(
     ]
     mock_notifier.discover_formatters.return_value = [{"name": "wechat_work"}]
     mock_notifier.deliver_event.return_value = unrelated
-    mock_sitemap.fetch_sitemap.return_value = []
+    mock_sitemap.fetch_sitemaps.return_value = []
     mock_sitemap.filter_by_category.return_value = {
         "news": set(), "research": set(), "engineering": set(), "learn": set()
     }

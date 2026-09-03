@@ -1,4 +1,4 @@
-"""Fetch page metadata while preventing redirects outside Anthropic."""
+"""Fetch page metadata while preventing redirects outside trusted origins."""
 
 from __future__ import annotations
 

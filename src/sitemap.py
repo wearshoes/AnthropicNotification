@@ -8,18 +8,22 @@ import requests
 from lxml import etree
 
 
-SITEMAP_URL = "https://www.anthropic.com/sitemap.xml"
+ANTHROPIC_HOST = "www.anthropic.com"
+ACADEMY_HOST = "academy.claude.com"
+TRUSTED_HOSTS = frozenset({ANTHROPIC_HOST, ACADEMY_HOST})
+SITEMAP_URL = f"https://{ANTHROPIC_HOST}/sitemap.xml"
+ACADEMY_SITEMAP_URL = f"https://{ACADEMY_HOST}/sitemap.xml"
+SITEMAP_URLS = (SITEMAP_URL, ACADEMY_SITEMAP_URL)
 SITEMAP_NS = {"ns": "http://www.sitemaps.org/schemas/sitemap/0.9"}
 TRUSTED_SCHEME = "https"
-TRUSTED_HOST = "www.anthropic.com"
 MAX_REDIRECTS = 5
 MAX_URL_CHARS = 2_048
 MIN_TOTAL_CONTENT_URLS = 300
 CATEGORIES = {
-    "news": "/news/",
-    "research": "/research/",
-    "engineering": "/engineering/",
-    "learn": "/learn/",
+    "news": (ANTHROPIC_HOST, "/news/"),
+    "research": (ANTHROPIC_HOST, "/research/"),
+    "engineering": (ANTHROPIC_HOST, "/engineering/"),
+    "learn": (ACADEMY_HOST, "/collections/"),
 }
 
 
@@ -38,14 +42,16 @@ def canonicalize_url(url: str) -> str:
     parsed = urlparse(url)
     if (
         parsed.scheme.lower() != TRUSTED_SCHEME
-        or parsed.hostname != TRUSTED_HOST
+        or parsed.hostname not in TRUSTED_HOSTS
         or parsed.username is not None
         or parsed.password is not None
         or parsed.port is not None
-        or parsed.netloc != TRUSTED_HOST
+        or parsed.netloc != parsed.hostname
     ):
-        raise UntrustedUrlError("URL is outside the trusted Anthropic origin")
-    return urlunparse((TRUSTED_SCHEME, TRUSTED_HOST, parsed.path or "/", "", "", ""))
+        raise UntrustedUrlError("URL is outside the trusted content origins")
+    return urlunparse(
+        (TRUSTED_SCHEME, parsed.hostname, parsed.path or "/", "", "", "")
+    )
 
 
 def _status_code(response) -> int:
@@ -94,6 +100,14 @@ def fetch_sitemap(url: str = SITEMAP_URL) -> list[dict]:
     return entries
 
 
+def fetch_sitemaps(urls: tuple[str, ...] = SITEMAP_URLS) -> list[dict]:
+    """Fetch every configured sitemap as one fail-closed snapshot."""
+    entries = []
+    for url in urls:
+        entries.extend(fetch_sitemap(url))
+    return entries
+
+
 def filter_by_category(entries: list[dict]) -> dict[str, set[str]]:
     """Group trusted canonical content URLs by configured path prefix."""
     result = {category: set() for category in CATEGORIES}
@@ -102,9 +116,13 @@ def filter_by_category(entries: list[dict]) -> dict[str, set[str]]:
             canonical = canonicalize_url(entry["loc"])
         except (KeyError, TypeError, ValueError):
             continue
-        path = urlparse(canonical).path
-        for category, prefix in CATEGORIES.items():
-            if path.startswith(prefix) and len(path) > len(prefix):
+        parsed = urlparse(canonical)
+        for category, (host, prefix) in CATEGORIES.items():
+            if (
+                parsed.hostname == host
+                and parsed.path.startswith(prefix)
+                and len(parsed.path) > len(prefix)
+            ):
                 result[category].add(canonical)
                 break
     return result

@@ -27,7 +27,7 @@ SAMPLE_SITEMAP_XML = """\
 <lastmod>2026-03-15T00:00:00.000Z</lastmod>
 </url>
 <url>
-<loc>https://www.anthropic.com/learn/claude-101</loc>
+<loc>https://academy.claude.com/collections/claude-for-you</loc>
 <lastmod>2026-01-10T00:00:00.000Z</lastmod>
 </url>
 <url>
@@ -102,6 +102,23 @@ class TestFetchSitemap:
             fetch_sitemap()
 
 
+class TestFetchSitemaps:
+    @patch("src.sitemap.fetch_sitemap")
+    def test_combines_every_configured_source(self, mock_fetch):
+        from src.sitemap import SITEMAP_URLS, fetch_sitemaps
+
+        mock_fetch.side_effect = [
+            [{"loc": "https://www.anthropic.com/news/a", "lastmod": None}],
+            [{"loc": "https://academy.claude.com/collections/b", "lastmod": None}],
+        ]
+
+        assert fetch_sitemaps() == [
+            {"loc": "https://www.anthropic.com/news/a", "lastmod": None},
+            {"loc": "https://academy.claude.com/collections/b", "lastmod": None},
+        ]
+        assert [call.args[0] for call in mock_fetch.call_args_list] == list(SITEMAP_URLS)
+
+
 class TestFilterByCategory:
     """Tests for filter_by_category()."""
 
@@ -115,7 +132,7 @@ class TestFilterByCategory:
             "https://www.anthropic.com/news/article-1",
             "https://www.anthropic.com/research/paper-1",
             "https://www.anthropic.com/engineering/post-1",
-            "https://www.anthropic.com/learn/course-1",
+            "https://academy.claude.com/collections/claude-for-you",
         ])
 
         result = filter_by_category(entries)
@@ -123,7 +140,24 @@ class TestFilterByCategory:
         assert result["news"] == {"https://www.anthropic.com/news/article-1"}
         assert result["research"] == {"https://www.anthropic.com/research/paper-1"}
         assert result["engineering"] == {"https://www.anthropic.com/engineering/post-1"}
-        assert result["learn"] == {"https://www.anthropic.com/learn/course-1"}
+        assert result["learn"] == {
+            "https://academy.claude.com/collections/claude-for-you"
+        }
+
+    def test_learn_accepts_only_academy_collections(self):
+        from src.sitemap import filter_by_category
+
+        entries = self._make_entries([
+            "https://academy.claude.com/collections/build-with-claude",
+            "https://academy.claude.com/collections",
+            "https://academy.claude.com/courses/build-with-claude/lesson-1",
+            "https://www.anthropic.com/learn/build-with-claude",
+            "https://academy.claude.com.evil.test/collections/lookalike",
+        ])
+
+        assert filter_by_category(entries)["learn"] == {
+            "https://academy.claude.com/collections/build-with-claude"
+        }
 
     def test_excludes_non_matching_urls(self):
         from src.sitemap import filter_by_category
