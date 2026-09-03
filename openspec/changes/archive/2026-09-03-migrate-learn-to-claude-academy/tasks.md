@@ -16,4 +16,4 @@
 - [x] 3.1 Run targeted tests, the full suite, coverage, and a live dry-run.
 - [x] 3.2 Union current Academy collections into learn baseline #43 and verify exact state.
 - [x] 3.3 Close verified stale duplicate baseline Issues.
-- [ ] 3.4 Sync main specs, archive the change, commit, push, and verify production Actions.
+- [x] 3.4 Sync main specs, archive the change, commit, push, and verify production Actions.
