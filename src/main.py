@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import logging
+import os
 import sys
+
+import requests
 
 from src import detector, issues, notifier, sitemap
 from src.outbox import OutboxEvent
@@ -19,6 +23,123 @@ logger = logging.getLogger(__name__)
 
 class PipelineDeliveryError(RuntimeError):
     """Raised after all independent delivery attempts have completed."""
+
+
+@dataclass(frozen=True)
+class FailureReport:
+    """Credential-safe explanation for an operator-facing pipeline failure."""
+
+    reason: str
+    suggestion: str
+    detail: str | None = None
+
+
+def _exception_type_detail(exc: Exception) -> str:
+    return f"异常类型：{type(exc).__name__}"
+
+
+def _build_failure_report(exc: Exception) -> FailureReport:
+    """Map expected failures to Chinese guidance without exposing arbitrary text."""
+    if isinstance(exc, sitemap.IncompleteSitemapError):
+        return FailureReport(
+            reason="内容源快照不完整，安全检查已阻止本轮继续执行。",
+            suggestion="检查上游 Sitemap、Engineering 页面结构和分类规则。",
+            detail=str(exc),
+        )
+    if isinstance(exc, sitemap.UntrustedUrlError):
+        return FailureReport(
+            reason="内容源地址或重定向离开了允许的 Anthropic 域名。",
+            suggestion="检查上游 Sitemap 和 Engineering 页面中的链接或重定向。",
+            detail=str(exc),
+        )
+    if isinstance(exc, requests.RequestException):
+        return FailureReport(
+            reason="访问 Anthropic 或 Claude Academy 内容源失败，本轮快照未完成。",
+            suggestion="检查上游网站可用性、网络连接和重定向状态。",
+            detail=_exception_type_detail(exc),
+        )
+    if isinstance(exc, issues.GitHubStateError):
+        return FailureReport(
+            reason="GitHub Issue 状态读取、写入或回读校验失败。",
+            suggestion=(
+                "检查 Actions 的 issues: write 权限、GITHUB_TOKEN 和 GitHub 服务状态。"
+            ),
+            detail=_exception_type_detail(exc),
+        )
+    if isinstance(exc, notifier.NoNotificationTargetsError):
+        return FailureReport(
+            reason="检测到新增内容，但没有可用的通知通道，基线未继续推进。",
+            suggestion="检查 WECHAT_WORK_WEBHOOK 或 DINGTALK_WEBHOOK 仓库 Secret。",
+            detail=str(exc),
+        )
+    if isinstance(exc, notifier.FormatterPlanningError):
+        return FailureReport(
+            reason="通知消息规划失败，为避免漏发，本轮未推进相应状态。",
+            suggestion="检查已启用通知格式器的版本、分块配置和消息格式。",
+            detail=_exception_type_detail(exc),
+        )
+    if isinstance(exc, (PipelineDeliveryError, notifier.DeliveryError)):
+        return FailureReport(
+            reason="通知未全部发送或回执，本轮任务未完成。",
+            suggestion=(
+                "检查企业微信或钉钉 Webhook、平台返回码和 notification-pending "
+                "Issue；下次运行会重试未回执消息。"
+            ),
+            detail=_exception_type_detail(exc),
+        )
+    return FailureReport(
+        reason="监控任务发生未分类异常，本轮未完成。",
+        suggestion="查看本步骤上方日志和异常类型；如重复出现，再补充专门诊断。",
+        detail=_exception_type_detail(exc),
+    )
+
+
+def _escape_workflow_command_data(value: str) -> str:
+    return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _render_failure_markdown(report: FailureReport) -> str:
+    lines = [
+        "## 监控任务未完成",
+        "",
+        f"- **原因**：{report.reason}",
+        f"- **处理建议**：{report.suggestion}",
+    ]
+    if report.detail:
+        lines.append(f"- **技术信息**：{report.detail}")
+    return "\n".join(lines) + "\n"
+
+
+def _emit_failure_report(report: FailureReport) -> None:
+    """Log the report and add Actions UI output without masking the failure."""
+    logger.error("监控任务未完成：%s", report.reason)
+    logger.error("处理建议：%s", report.suggestion)
+    if report.detail:
+        logger.error("技术信息：%s", report.detail)
+
+    if os.environ.get("GITHUB_ACTIONS", "").lower() != "true":
+        return
+
+    annotation_lines = [
+        f"原因：{report.reason}",
+        f"处理建议：{report.suggestion}",
+    ]
+    if report.detail:
+        annotation_lines.append(f"技术信息：{report.detail}")
+    annotation = _escape_workflow_command_data("\n".join(annotation_lines))
+    print(f"::error title=监控任务未完成::{annotation}", file=sys.stderr, flush=True)
+
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_path:
+        return
+    try:
+        with open(summary_path, "a", encoding="utf-8", newline="\n") as summary:
+            summary.write(_render_failure_markdown(report))
+    except OSError as summary_error:
+        logger.warning(
+            "无法写入 GitHub Actions 运行摘要：%s",
+            type(summary_error).__name__,
+        )
 
 
 def _find_conflicting_pending_owners(
@@ -122,7 +243,7 @@ def main() -> None:
     try:
         run(dry_run=args.dry_run)
     except Exception as exc:
-        logger.error("Fatal error: %s", exc)
+        _emit_failure_report(_build_failure_report(exc))
         sys.exit(1)
 
 

@@ -31,6 +31,8 @@ Webhook APIs do not provide an idempotency key. If a process stops after a webho
 
 The workflow requests a run every 30 minutes, but GitHub Actions scheduled execution is best-effort and can be delayed or skipped by GitHub. Use `workflow_dispatch` when an immediate check is required.
 
+When the production monitor fails, the `Run monitor` log provides a Chinese reason and recovery suggestion. The Actions page also shows a red error annotation and a run summary with safe technical diagnostics. Allowlisted details such as snapshot counts and empty categories are displayed, while arbitrary exception and GitHub response text is suppressed to avoid exposing tokens or webhooks.
+
 ## Monitored Pages
 
 | Category | Source and URL Pattern | Content |

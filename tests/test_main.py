@@ -1,6 +1,7 @@
 """Tests for the durable main orchestrator."""
 
 from dataclasses import replace
+import sys
 from unittest.mock import call, patch
 
 import pytest
@@ -144,3 +145,148 @@ class TestDryRun:
         assert run(dry_run=True) == categorized
         mock_issues.list_pending_events.assert_not_called()
         mock_detector.process_category.assert_not_called()
+
+
+class TestFailureReporting:
+    def test_incomplete_snapshot_has_chinese_reason_and_safe_detail(self):
+        from src.main import _build_failure_report
+        from src.sitemap import IncompleteSitemapError
+
+        report = _build_failure_report(IncompleteSitemapError(
+            "Sitemap snapshot is incomplete: total=497, empty=engineering"
+        ))
+
+        assert report.reason == "内容源快照不完整，安全检查已阻止本轮继续执行。"
+        assert report.suggestion == "检查上游 Sitemap、Engineering 页面结构和分类规则。"
+        assert report.detail == (
+            "Sitemap snapshot is incomplete: total=497, empty=engineering"
+        )
+
+    def test_known_failure_classes_have_actionable_chinese_reason(self):
+        import requests
+
+        from src import notifier
+        from src.main import PipelineDeliveryError, _build_failure_report
+        from src.sitemap import UntrustedUrlError
+
+        cases = [
+            (
+                UntrustedUrlError("URL is outside the trusted content origins"),
+                "内容源地址或重定向离开了允许的 Anthropic 域名。",
+            ),
+            (
+                requests.Timeout("TOPSECRET"),
+                "访问 Anthropic 或 Claude Academy 内容源失败，本轮快照未完成。",
+            ),
+            (
+                notifier.NoNotificationTargetsError(
+                    "[news] New content is blocked because no formatter is enabled"
+                ),
+                "检测到新增内容，但没有可用的通知通道，基线未继续推进。",
+            ),
+            (
+                notifier.FormatterPlanningError("TOPSECRET"),
+                "通知消息规划失败，为避免漏发，本轮未推进相应状态。",
+            ),
+            (
+                PipelineDeliveryError("TOPSECRET"),
+                "通知未全部发送或回执，本轮任务未完成。",
+            ),
+        ]
+
+        for error, expected_reason in cases:
+            report = _build_failure_report(error)
+            assert report.reason == expected_reason
+            assert report.suggestion
+            if "TOPSECRET" in str(error):
+                assert "TOPSECRET" not in " ".join(
+                    part
+                    for part in (report.reason, report.suggestion, report.detail)
+                    if part
+                )
+
+    def test_unknown_error_omits_arbitrary_message(self):
+        from src.main import _build_failure_report
+
+        report = _build_failure_report(RuntimeError(
+            "failed for https://hooks.example/send?key=TOPSECRET"
+        ))
+
+        assert report.reason == "监控任务发生未分类异常，本轮未完成。"
+        assert report.detail == "异常类型：RuntimeError"
+        rendered = " ".join((report.reason, report.suggestion, report.detail))
+        assert "TOPSECRET" not in rendered
+        assert "https://" not in rendered
+
+    def test_github_state_error_omits_cli_output(self):
+        from src.issues import GitHubStateError
+        from src.main import _build_failure_report
+
+        report = _build_failure_report(GitHubStateError(
+            "gh api failed: authorization Bearer TOPSECRET"
+        ))
+
+        assert report.reason == "GitHub Issue 状态读取、写入或回读校验失败。"
+        assert report.detail == "异常类型：GitHubStateError"
+        assert "TOPSECRET" not in " ".join(
+            (report.reason, report.suggestion, report.detail)
+        )
+
+    def test_github_actions_annotation_and_summary_are_chinese_and_escaped(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        from src.main import FailureReport, _emit_failure_report
+
+        summary = tmp_path / "step-summary.md"
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+        report = FailureReport(
+            reason="第一行%完成\n第二行",
+            suggestion="检查配置",
+            detail="异常类型：ExampleError",
+        )
+
+        _emit_failure_report(report)
+
+        annotation = capsys.readouterr().err
+        assert annotation.startswith("::error title=监控任务未完成::")
+        assert "%25" in annotation
+        assert "%0A" in annotation
+        markdown = summary.read_text(encoding="utf-8")
+        assert "## 监控任务未完成" in markdown
+        assert "- **原因**：第一行%完成\n第二行" in markdown
+        assert "- **处理建议**：检查配置" in markdown
+        assert "- **技术信息**：异常类型：ExampleError" in markdown
+
+    def test_unwritable_summary_does_not_replace_original_failure(
+        self, monkeypatch, tmp_path, caplog
+    ):
+        from src.main import FailureReport, _emit_failure_report
+
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path))
+        report = FailureReport("失败", "检查", "异常类型：ExampleError")
+
+        _emit_failure_report(report)
+
+        assert "无法写入 GitHub Actions 运行摘要" in caplog.text
+
+    @patch("src.main._emit_failure_report")
+    @patch("src.main.run")
+    def test_main_reports_failure_and_keeps_nonzero_exit(
+        self, mock_run, mock_emit, monkeypatch
+    ):
+        from src.main import main
+        from src.sitemap import IncompleteSitemapError
+
+        mock_run.side_effect = IncompleteSitemapError(
+            "Sitemap snapshot is incomplete: total=497, empty=engineering"
+        )
+        monkeypatch.setattr(sys, "argv", ["monitor"])
+
+        with pytest.raises(SystemExit) as raised:
+            main()
+
+        assert raised.value.code == 1
+        report = mock_emit.call_args.args[0]
+        assert "内容源快照不完整" in report.reason
