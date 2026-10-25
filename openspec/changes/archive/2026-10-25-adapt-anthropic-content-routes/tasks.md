@@ -15,5 +15,5 @@
 
 - [x] 3.1 Run targeted tests, full tests, coverage, and live dry-run.
 - [x] 3.2 Apply and verify monotonic baseline unions for historical/moved content.
-- [ ] 3.3 Push the implementation and verify genuine backlog delivery in GitHub Actions.
-- [ ] 3.4 Verify a second run is successful with no duplicate delivery, then archive the change.
+- [x] 3.3 Push the implementation and verify genuine backlog delivery in GitHub Actions.
+- [x] 3.4 Verify a second run is successful with no duplicate delivery, then archive the change.
