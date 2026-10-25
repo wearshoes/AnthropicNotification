@@ -12,4 +12,4 @@
 ## 3. Verification
 
 - [x] 3.1 Run focused and full tests, coverage, strict OpenSpec validation, and dry-run.
-- [ ] 3.2 Push and verify a successful production Action remains unchanged, then archive the change.
+- [x] 3.2 Push and verify a successful production Action remains unchanged, then archive the change.
