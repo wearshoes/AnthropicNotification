@@ -37,6 +37,18 @@ SAMPLE_SITEMAP_XML = """\
 </urlset>
 """
 
+ENGINEERING_HTML = """\
+<!doctype html><html><body>
+<a href="/research/outside-main">Header navigation</a>
+<main>
+<a href="/research/engineering-a?source=engineering">Engineering A</a>
+<a href="https://www.anthropic.com/research/engineering-b">Engineering B</a>
+<a href="/research/team/alignment">Team navigation</a>
+<a href="/research/engineering/nested">Nested navigation</a>
+<a href="https://evil.test/research/not-trusted">Lookalike</a>
+</main></body></html>
+"""
+
 
 class TestFetchSitemap:
     """Tests for fetch_sitemap()."""
@@ -117,6 +129,19 @@ class TestFetchSitemaps:
             {"loc": "https://academy.claude.com/collections/b", "lastmod": None},
         ]
         assert [call.args[0] for call in mock_fetch.call_args_list] == list(SITEMAP_URLS)
+
+
+class TestFetchEngineeringUrls:
+    @patch("src.sitemap._get_without_untrusted_redirects")
+    def test_extracts_only_single_segment_trusted_research_links(self, mock_get):
+        from src.sitemap import fetch_engineering_urls
+
+        mock_get.return_value = MagicMock(text=ENGINEERING_HTML)
+
+        assert fetch_engineering_urls() == {
+            "https://www.anthropic.com/research/engineering-a",
+            "https://www.anthropic.com/research/engineering-b",
+        }
 
 
 class TestFilterByCategory:
@@ -209,3 +234,37 @@ class TestFilterByCategory:
         result = filter_by_category(entries)
 
         assert result["news"] == {"https://www.anthropic.com/news/real-article"}
+
+    def test_engineering_index_membership_overrides_research(self):
+        from src.sitemap import filter_by_category
+
+        engineering = "https://www.anthropic.com/research/engineering-a"
+        missing = "https://www.anthropic.com/research/not-in-sitemap"
+        entries = self._make_entries([
+            engineering,
+            "https://www.anthropic.com/research/paper-a",
+        ])
+
+        result = filter_by_category(entries, {engineering, missing})
+
+        assert result["engineering"] == {engineering}
+        assert result["research"] == {
+            "https://www.anthropic.com/research/paper-a"
+        }
+
+    def test_excludes_structural_news_and_research_pages(self):
+        from src.sitemap import filter_by_category
+
+        entries = self._make_entries([
+            "https://www.anthropic.com/news/announcements",
+            "https://www.anthropic.com/news/article-a",
+            "https://www.anthropic.com/research/team/alignment",
+            "https://www.anthropic.com/research/paper-a",
+        ])
+
+        result = filter_by_category(entries)
+
+        assert result["news"] == {"https://www.anthropic.com/news/article-a"}
+        assert result["research"] == {
+            "https://www.anthropic.com/research/paper-a"
+        }

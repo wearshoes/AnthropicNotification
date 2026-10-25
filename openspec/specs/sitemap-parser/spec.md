@@ -1,10 +1,10 @@
 ## Requirements
 
-### Requirement: Parse configured sitemap XML sources
-The system SHALL fetch both `https://www.anthropic.com/sitemap.xml` and `https://academy.claude.com/sitemap.xml` and combine the `loc` and optional `lastmod` entries into one snapshot.
+### Requirement: Parse configured content sources
+The system SHALL fetch both configured XML sitemaps and the exact `https://www.anthropic.com/engineering` landing page as one fail-closed snapshot. Sitemap entries SHALL contribute `loc` and optional `lastmod` values. The engineering page SHALL contribute trusted article membership.
 
 #### Scenario: One configured source fails
-- **WHEN** fetching or parsing either configured sitemap fails
+- **WHEN** fetching or parsing either configured sitemap or the engineering landing page fails
 - **THEN** the run SHALL report failure
 - **AND** previously pending delivery SHALL already have been attempted
 
@@ -19,8 +19,8 @@ Only category routes on the exact `https://www.anthropic.com` and `https://acade
 - **WHEN** a content page redirects to an origin outside the exact trusted set
 - **THEN** the unconfigured origin SHALL NOT be requested
 
-### Requirement: Filter categories
-Trusted Anthropic URLs SHALL be grouped by `/news/`, `/research/`, and `/engineering/`. Trusted Claude Academy URLs under `/collections/` SHALL be grouped as `learn`. Category index pages, legacy `/learn/*` paths, Academy lessons, and unrelated paths SHALL be excluded.
+### Requirement: Filter exclusive content categories
+Trusted Anthropic news and research article URLs, engineering landing-page article URLs, and Claude Academy collection URLs SHALL be assigned to at most one category. Engineering landing-page membership SHALL override the generic research route. Category indexes, news section landing pages, research team pages, Academy lessons, and unrelated paths SHALL be excluded. Direct `/engineering/<slug>` sitemap entries SHALL remain supported.
 
 #### Scenario: Category index
 - **WHEN** a URL path is exactly `/news`
@@ -29,6 +29,19 @@ Trusted Anthropic URLs SHALL be grouped by `/news/`, `/research/`, and `/enginee
 #### Scenario: Academy course lesson
 - **WHEN** an Academy URL uses the `/courses/` prefix
 - **THEN** it SHALL NOT be classified as a learn collection
+
+#### Scenario: Engineering article uses research path
+- **WHEN** `/engineering` links to a sitemap URL under `/research/<slug>`
+- **THEN** the URL SHALL be classified as engineering
+- **AND** SHALL NOT also be classified as research
+
+#### Scenario: Engineering link is not in sitemap
+- **WHEN** `/engineering` links to a trusted article URL absent from the fetched sitemap
+- **THEN** the URL SHALL be excluded from the snapshot
+
+#### Scenario: News section landing page
+- **WHEN** the sitemap contains a configured `/news/<section>` landing path
+- **THEN** it SHALL NOT be classified as a news article
 
 ### Requirement: Snapshot completeness guard
 The system SHALL reject every sitemap snapshot unless all configured categories are non-empty and the combined monitored URL count is at least 300. Existing baselines SHALL never shrink.

@@ -6,7 +6,7 @@ Monitor new content published on [Anthropic](https://www.anthropic.com) and [Cla
 
 ## Features
 
-- Two-sitemap monitoring for news, research, engineering, and learn pages
+- Two-sitemap plus Engineering-index monitoring for news, research, engineering, and learn pages
 - GitHub Issues as a durable baseline and notification outbox
 - At-least-once delivery with per-message receipts and automatic retry
 - Complete message chunking: WeChat Work sends at most 8 articles per message without dropping the remainder
@@ -37,10 +37,10 @@ The workflow requests a run every 30 minutes, but GitHub Actions scheduled execu
 |----------|------------------------|---------|
 | news | `www.anthropic.com/news/*` | Product launches and company announcements |
 | research | `www.anthropic.com/research/*` | AI safety papers and technical reports |
-| engineering | `www.anthropic.com/engineering/*` | Engineering posts |
+| engineering | `www.anthropic.com/research/*` entries listed by `/engineering` | Engineering posts |
 | learn | `academy.claude.com/collections/*` | Claude Academy learning collections |
 
-Only category-routed canonical HTTPS URLs on the exact `www.anthropic.com` or `academy.claude.com` host are accepted. Academy course lessons, tutorials, and index pages do not enter the learn category. A snapshot is rejected unless all four categories are non-empty and their combined content count is at least 300. Existing baselines never shrink.
+Only category-routed canonical HTTPS URLs on the exact `www.anthropic.com` or `academy.claude.com` host are accepted. Articles listed by the Engineering page belong exclusively to engineering rather than research. News section landing pages, research team pages, and Academy course lessons, tutorials, and indexes are excluded. A snapshot is rejected unless all four categories are non-empty and their combined content count is at least 300. Existing baselines never shrink.
 
 ## Quick Start
 

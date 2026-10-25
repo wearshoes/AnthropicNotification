@@ -5,6 +5,7 @@ from __future__ import annotations
 from urllib.parse import urljoin, urlparse, urlunparse
 
 import requests
+from bs4 import BeautifulSoup
 from lxml import etree
 
 
@@ -14,6 +15,7 @@ TRUSTED_HOSTS = frozenset({ANTHROPIC_HOST, ACADEMY_HOST})
 SITEMAP_URL = f"https://{ANTHROPIC_HOST}/sitemap.xml"
 ACADEMY_SITEMAP_URL = f"https://{ACADEMY_HOST}/sitemap.xml"
 SITEMAP_URLS = (SITEMAP_URL, ACADEMY_SITEMAP_URL)
+ENGINEERING_INDEX_URL = f"https://{ANTHROPIC_HOST}/engineering"
 SITEMAP_NS = {"ns": "http://www.sitemaps.org/schemas/sitemap/0.9"}
 TRUSTED_SCHEME = "https"
 MAX_REDIRECTS = 5
@@ -25,6 +27,16 @@ CATEGORIES = {
     "engineering": (ANTHROPIC_HOST, "/engineering/"),
     "learn": (ACADEMY_HOST, "/collections/"),
 }
+NEWS_SECTION_PATHS = frozenset({
+    "/news/announcements",
+    "/news/features",
+    "/news/models",
+    "/news/partnerships",
+    "/news/policy",
+    "/news/product",
+    "/news/safeguards",
+    "/news/security",
+})
 
 
 class UntrustedUrlError(ValueError):
@@ -108,23 +120,75 @@ def fetch_sitemaps(urls: tuple[str, ...] = SITEMAP_URLS) -> list[dict]:
     return entries
 
 
-def filter_by_category(entries: list[dict]) -> dict[str, set[str]]:
+def _is_single_segment_path(path: str, prefix: str) -> bool:
+    normalized = path.rstrip("/")
+    if not normalized.startswith(prefix):
+        return False
+    remainder = normalized[len(prefix):]
+    return bool(remainder) and "/" not in remainder
+
+
+def fetch_engineering_urls(url: str = ENGINEERING_INDEX_URL) -> set[str]:
+    """Extract trusted article links from Anthropic's engineering landing page."""
+    response = _get_without_untrusted_redirects(url)
+    soup = BeautifulSoup(response.text, "html.parser")
+    content = soup.find("main")
+    if content is None:
+        return set()
+    urls = set()
+    for anchor in content.find_all("a", href=True):
+        try:
+            canonical = canonicalize_url(urljoin(url, anchor["href"]))
+        except (TypeError, ValueError):
+            continue
+        parsed = urlparse(canonical)
+        if (
+            parsed.hostname == ANTHROPIC_HOST
+            and _is_single_segment_path(parsed.path, "/research/")
+        ):
+            urls.add(canonical)
+    return urls
+
+
+def filter_by_category(
+    entries: list[dict],
+    engineering_urls: set[str] | None = None,
+) -> dict[str, set[str]]:
     """Group trusted canonical content URLs by configured path prefix."""
     result = {category: set() for category in CATEGORIES}
+    sitemap_urls = set()
     for entry in entries:
         try:
             canonical = canonicalize_url(entry["loc"])
         except (KeyError, TypeError, ValueError):
             continue
+        sitemap_urls.add(canonical)
         parsed = urlparse(canonical)
         for category, (host, prefix) in CATEGORIES.items():
             if (
                 parsed.hostname == host
-                and parsed.path.startswith(prefix)
-                and len(parsed.path) > len(prefix)
+                and _is_single_segment_path(parsed.path, prefix)
+                and not (
+                    category == "news"
+                    and parsed.path.rstrip("/") in NEWS_SECTION_PATHS
+                )
             ):
                 result[category].add(canonical)
                 break
+
+    for url in engineering_urls or set():
+        try:
+            canonical = canonicalize_url(url)
+        except (TypeError, ValueError):
+            continue
+        parsed = urlparse(canonical)
+        if (
+            canonical in sitemap_urls
+            and parsed.hostname == ANTHROPIC_HOST
+            and _is_single_segment_path(parsed.path, "/research/")
+        ):
+            result["research"].discard(canonical)
+            result["engineering"].add(canonical)
     return result
 
 

@@ -1,6 +1,6 @@
 # CODEBUDDY.md
 
-This repository monitors Anthropic and Claude Academy sitemaps, stores durable state in GitHub Issues, and sends WeChat Work or DingTalk webhook notifications.
+This repository monitors Anthropic and Claude Academy sitemaps plus Anthropic's Engineering index, stores durable state in GitHub Issues, and sends WeChat Work or DingTalk webhook notifications.
 
 ## Compound Interest Principle
 
@@ -49,6 +49,7 @@ persist and verify outbox event
 - A new delta with no enabled formatter is blocked before outbox creation or baseline progress.
 - Pending events repair their category baseline before delivery and drain before sitemap fetching.
 - Baselines only grow; every accepted sitemap snapshot has all configured categories non-empty and at least 300 monitored URLs in total.
+- Engineering index membership overrides the generic research path so each current URL has one category owner.
 - Workflow concurrency provides one Issue-state writer.
 
 ## Architecture
@@ -114,7 +115,7 @@ python -m src.main  # requires gh and GH_TOKEN
 
 ## Adding a Category
 
-1. Add its exact host and path prefix route to `CATEGORIES` in `src/sitemap.py`.
+1. Add its exact host and route rule to `src/sitemap.py`; curated sources may override a generic path route.
 2. Write sitemap and snapshot-guard tests first.
 3. Update both READMEs and OpenSpec.
 4. Ensure first-run and empty-category baseline behavior remains explicit.

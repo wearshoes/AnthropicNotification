@@ -76,6 +76,7 @@ class TestRun:
         delivered = record_receipt(event, event.chunks[0].chunk_id)
         mock_issues.list_pending_events.return_value = []
         mock_sitemap.fetch_sitemaps.return_value = [{"loc": event.items[0].url}]
+        mock_sitemap.fetch_engineering_urls.return_value = set()
         mock_sitemap.filter_by_category.return_value = {
             "news": {event.items[0].url}, "research": set(),
             "engineering": set(), "learn": set(),
@@ -86,6 +87,9 @@ class TestRun:
 
         run()
 
+        mock_sitemap.filter_by_category.assert_called_once_with(
+            [{"loc": event.items[0].url}], set()
+        )
         assert mock_detector.process_category.call_count == 4
         mock_notifier.deliver_event.assert_called_once()
         mock_issues.finalize_outbox_event.assert_called_once_with(delivered)

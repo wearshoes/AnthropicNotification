@@ -57,9 +57,10 @@ def _deliver_and_finalize(event: OutboxEvent, formatters: list[dict]) -> OutboxE
 
 
 def _fetch_categorized() -> dict[str, set[str]]:
-    logger.info("Fetching sitemap...")
+    logger.info("Fetching content sources...")
     entries = sitemap.fetch_sitemaps()
-    categorized = sitemap.filter_by_category(entries)
+    engineering_urls = sitemap.fetch_engineering_urls()
+    categorized = sitemap.filter_by_category(entries, engineering_urls)
     sitemap.validate_snapshot_shape(categorized)
     logger.info(
         "Found %s URLs across %s categories",
